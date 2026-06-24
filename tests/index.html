@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>VDOM Tests — Browser</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        h1 { color: #2c3e50; margin-bottom: 10px; }
+        .subtitle { color: #7f8c8d; margin-bottom: 20px; }
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: transform 0.1s;
+        }
+        button:hover:not(:disabled) { transform: translateY(-1px); }
+        button:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+        #progress {
+            margin: 20px 0;
+            padding: 12px 16px;
+            background: white;
+            border-radius: 8px;
+            font-size: 14px;
+            color: #34495e;
+            display: none;
+        }
+        #progress.visible { display: block; }
+        .test-item {
+            padding: 10px 14px;
+            margin: 6px 0;
+            border-left: 4px solid #bdc3c7;
+            background: white;
+            border-radius: 4px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+        .test-item.running {
+            border-color: #3498db;
+            background: #e3f2fd;
+        }
+        .test-item.pass {
+            border-color: #27ae60;
+            background: #e8f5e9;
+        }
+        .test-item.fail {
+            border-color: #e74c3c;
+            background: #ffebee;
+        }
+        .test-name { font-weight: 500; }
+        .test-error {
+            color: #c0392b;
+            font-size: 11px;
+            margin-top: 6px;
+            padding: 8px;
+            background: #fff;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        #summary {
+            margin-top: 20px;
+            padding: 16px;
+            background: white;
+            border-radius: 8px;
+            font-weight: 500;
+            font-size: 15px;
+            display: none;
+        }
+        #summary.visible { display: block; }
+        #summary.pass {
+            background: #d4edda;
+            color: #155724;
+            border-left: 4px solid #27ae60;
+        }
+        #summary.fail {
+            background: #f8d7da;
+            color: #721c24;
+            border-left: 4px solid #e74c3c;
+        }
+        .stats {
+            display: inline-block;
+            margin-right: 15px;
+        }
+        .stats .count {
+            font-size: 24px;
+            font-weight: bold;
+        }
+        .stats .label {
+            font-size: 12px;
+            color: #7f8c8d;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 VDOM Library Tests</h1>
+    <p class="subtitle">Последовательное выполнение тестов для проверки контрактов библиотеки</p>
+
+    <button id="start">▶️ Старт тесты</button>
+
+    <div id="progress"></div>
+    <div id="log"></div>
+    <div id="summary"></div>
+
+    <script type="module">
+        import { h, Component, Fragment, createPortal, mount, refresh, _cleanupAll } from '../src/core.js';
+
+        // Утилиты
+        const container = document.createElement('div');
+        container.style.display = 'none';
+        document.body.appendChild(container);
+
+        function newContainer() {
+            const c = document.createElement('div');
+            container.appendChild(c);
+            return c;
+        }
+
+        function cleanup() {
+            _cleanupAll();
+            container.innerHTML = '';
+        }
+
+        // Определение тестов
+        const tests = [
+            {
+                name: 'h() — базовая нормализация',
+                fn: () => {
+                    const vnode = h('div', { id: 'test' }, 'hello');
+                    assert(vnode.tag === 'div', 'tag должен быть div');
+                    assert(vnode.props.id === 'test', 'props.id должен быть test');
+                    assert(vnode.childs.length === 1, 'должен быть 1 child');
+                }
+            },
+            {
+                name: 'h() — null/false/true → null',
+                fn: () => {
+                    const vnode = h('div', null, null, false, true, 'ok');
+                    assert(vnode.childs[0] === null, 'null должен остаться null');
+                    assert(vnode.childs[1] === null, 'false → null');
+                    assert(vnode.childs[2] === null, 'true → null');
+                    assert(vnode.childs[3]._text === 'ok', 'строка должна быть');
+                }
+            },
+            {
+                name: 'h() — строки/числа → _text',
+                fn: () => {
+                    const vnode = h('div', null, 'text', 42);
+                    assert(vnode.childs[0]._text === 'text', 'строка');
+                    assert(vnode.childs[1]._text === '42', 'число');
+                }
+            },
+            {
+                name: 'h() — массивы не flat-ятся',
+                fn: () => {
+                    const arr = [h('span'), h('span')];
+                    const vnode = h('div', null, arr);
+                    assert(Array.isArray(vnode.childs[0]), 'массив должен остаться');
+                    assert(vnode.childs[0].length === 2, 'должен иметь 2 элемента');
+                }
+            },
+            {
+                name: 'Component() — возвращает конструктор',
+                fn: () => {
+                    const MyComp = Component({ name: 'Test', render() { return h('div'); } });
+                    assert(MyComp._definition, 'должен иметь _definition');
+                    assert(MyComp._definition.name === 'Test', 'name должен сохраниться');
+                    const inst = new MyComp();
+                    assert(inst._definition === MyComp._definition, 'instance._definition');
+                }
+            },
+            {
+                name: 'mount() — HTML тег',
+                fn: () => {
+                    const c = newContainer();
+                    mount(h('div', { id: 'root' }, 'hello'), c);
+                    assert(c.firstChild.tagName === 'DIV', 'должен быть DIV');
+                    assert(c.firstChild.id === 'root', 'id должен быть root');
+                    assert(c.firstChild.textContent === 'hello', 'текст');
+                }
+            },
+            {
+                name: 'mount() — компонент с init',
+                fn: () => {
+                    const c = newContainer();
+                    const MyComp = Component({
+                        count: 0,
+                        init() { this.count = 10; },
+                        render() { return h('div', null, 'Count: ', this.count); }
+                    });
+                    mount(MyComp, c);
+                    assert(c.textContent === 'Count: 10', 'count должен быть 10');
+                }
+            },
+            {
+                name: 'mount() — конструктор без h()',
+                fn: () => {
+                    const c = newContainer();
+                    const MyComp = Component({
+                        render() { return h('span', null, 'works'); }
+                    });
+                    mount(MyComp, c);
+                    assert(c.textContent === 'works', 'должно работать');
+                }
+            },
+            {
+                name: 'mount() — массив как Fragment',
+                fn: () => {
+                    const c = newContainer();
+                    mount([h('span', null, 'a'), h('span', null, 'b')], c);
+                    assert(c.querySelectorAll('span').length === 2, '2 span');
+                }
+            },
+            {
+                name: 'props() первым аргументом в init',
+                fn: () => {
+                    const c = newContainer();
+                    let received = null;
+                    const MyComp = Component({
+                        init(props) { received = props; },
+                        render() { return h('div'); }
+                    });
+                    mount(h(MyComp, { value: 42 }), c);
+                    assert(received !== null, 'props должны прийти');
+                    assert(received.value === 42, 'value должен быть 42');
+                }
+            },
+            {
+                name: 'props() первым аргументом в render',
+                fn: () => {
+                    const c = newContainer();
+                    let received = null;
+                    const MyComp = Component({
+                        render(props) { received = props; return h('div'); }
+                    });
+                    mount(h(MyComp, { x: 1 }), c);
+                    assert(received.x === 1, 'x должен быть 1');
+                }
+            },
+            {
+                name: 'init() вызывается только один раз',
+                fn: () => {
+                    const c = newContainer();
+                    let initCount = 0;
+                    const MyComp = Component({
+                        init() { initCount++; },
+                        render() { return h('div'); }
+                    });
+                    mount(MyComp, c);
+                    mount(MyComp, c);
+                    mount(MyComp, c);
+                    assert(initCount === 1, 'init должен вызваться 1 раз, а не ' + initCount);
+                }
+            },
+            {
+                name: 'children автоматически попадают в props',
+                fn: () => {
+                    const c = newContainer();
+                    let received = null;
+                    const Parent = Component({
+                        render(props) {
+                            received = props.children;
+                            return h('div', null, props.children);
+                        }
+                    });
+                    mount(h(Parent, null, h('span', null, 'child')), c);
+                    assert(received !== null, 'children должны быть в props');
+                }
+            },
+            {
+                name: 'memo() блокирует render при тех же deps',
+                fn: () => {
+                    const c = newContainer();
+                    let renderCount = 0;
+                    const MyComp = Component({
+                        memo(props) { return [props.value]; },
+                        render(props) { renderCount++; return h('div'); }
+                    });
+                    mount(h(MyComp, { value: 1 }), c);
+                    mount(h(MyComp, { value: 1 }), c);
+                    mount(h(MyComp, { value: 1 }), c);
+                    assert(renderCount === 1, 'render должен быть 1 раз, а не ' + renderCount);
+                }
+            },
+            {
+                name: 'memo() разрешает render при других deps',
+                fn: () => {
+                    const c = newContainer();
+                    let renderCount = 0;
+                    const MyComp = Component({
+                        memo(props) { return [props.value]; },
+                        render(props) { renderCount++; return h('div'); }
+                    });
+                    mount(h(MyComp, { value: 1 }), c);
+                    mount(h(MyComp, { value: 2 }), c);
+                    mount(h(MyComp, { value: 3 }), c);
+                    assert(renderCount === 3, 'render должен быть 3 раза');
+                }
+            },
+            {
+                name: 'memo() блокирует только текущий компонент',
+                fn: () => {
+                    const c = newContainer();
+                    let parentR = 0, childR = 0;
+
+                    const Child = Component({
+                        render() { childR++; return h('span'); }
+                    });
+
+                    const Parent = Component({
+                        memo(props) { return [props.value]; },
+                        render() { parentR++; return h('div', null, h(Child)); }
+                    });
+
+                    mount(h(Parent, { value: 1 }), c);
+                    mount(h(Parent, { value: 1 }), c);
+
+                    assert(parentR === 1, 'родитель не должен ререндериться: ' + parentR);
+                    assert(childR === 2, 'ребёнок должен ререндериться: ' + childR);
+                }
+            },
+            {
+                name: 'onMounted вызывается один раз',
+                fn: async () => {
+                    const c = newContainer();
+                    let mounted = 0;
+                    const MyComp = Component({
+                        onMounted() { mounted++; },
+                        render() { return h('div'); }
+                    });
+                    mount(MyComp, c);
+                    await delay(10);
+                    assert(mounted === 1, 'onMounted должен вызваться 1 раз: ' + mounted);
+                }
+            },
+            {
+                name: 'onMounted вызывается children-first',
+                fn: async () => {
+                    const c = newContainer();
+                    const order = [];
+
+                    const Child = Component({
+                        onMounted() { order.push('child'); },
+                        render() { return h('span'); }
+                    });
+
+                    const Parent = Component({
+                        onMounted() { order.push('parent'); },
+                        render() { return h('div', null, h(Child)); }
+                    });
+
+                    mount(Parent, c);
+                    await delay(10);
+                    assert(order[0] === 'child', 'child должен быть первым: ' + order.join(','));
+                    assert(order[1] === 'parent', 'parent должен быть вторым');
+                }
+            },
+            {
+                name: 'onUnmounted вызывается до удаления DOM',
+                fn: async () => {
+                    const c = newContainer();
+                    let wasInDOM = false;
+
+                    const MyComp = Component({
+                        onUnmounted() {
+                            wasInDOM = document.body.contains(c);
+                        },
+                        render() { return h('div'); }
+                    });
+
+                    mount(MyComp, c);
+                    await delay(10);
+                    mount(null, c);
+                    await delay(10);
+
+                    assert(wasInDOM === true, 'контейнер должен быть в DOM при onUnmounted');
+                }
+            },
+            {
+                name: 'onUpdated вызывается только при render',
+                fn: async () => {
+                    const c = newContainer();
+                    let updated = 0;
+                    const MyComp = Component({
+                        count: 0,
+                        memo() { return [this.count]; },
+                        onUpdated() { updated++; },
+                        render() { return h('div', null, this.count); }
+                    });
+                    const vnode = mount(MyComp, c);
+                    const inst = vnode._instance;
+                    inst.update({ count: 0 });
+                    await delay(10);
+                    assert(updated === 0, 'не должен вызваться: ' + updated);
+                    inst.update({ count: 1 });
+                    await delay(10);
+                    assert(updated === 1, 'должен вызваться 1 раз');
+                }
+            },
+            {
+                name: 'Context распространяется вниз',
+                fn: () => {
+                    const c = newContainer();
+                    let received = null;
+
+                    const Child = Component({
+                        render() {
+                            received = this.context('lang');
+                            return h('span');
+                        }
+                    });
+
+                    const Parent = Component({
+                        context: { lang() { return 'ru'; } },
+                        render() { return h('div', null, h(Child)); }
+                    });
+
+                    mount(Parent, c);
+                    assert(received === 'ru', 'должен получить "ru": ' + received);
+                }
+            },
+            {
+                name: 'contextSelf ищет сначала в себе',
+                fn: () => {
+                    const c = newContainer();
+                    let received = null;
+
+                    const MyComp = Component({
+                        context: { lang() { return 'self'; } },
+                        render() {
+                            received = this.contextSelf('lang');
+                            return h('div');
+                        }
+                    });
+
+                    mount(MyComp, c);
+                    assert(received === 'self', 'должен получить self: ' + received);
+                }
+            },
+            {
+                name: 'Global keys сохраняют instance',
+                fn: () => {
+                    const c = newContainer();
+                    const instances = [];
+
+                    const Item = Component({
+                        init() { instances.push(this); },
+                        render() { return h('div'); }
+                    });
+
+                    mount(h('div', null, h(Item, { key: 'x' })), c);
+                    const first = instances[0];
+
+                    mount(h('div', null, h('span'), h(Item, { key: 'x' })), c);
+
+                    assert(instances.length === 1, 'instance не должен пересоздаваться');
+                    assert(instances[0] === first, 'тот же instance');
+                }
+            },
+            {
+                name: 'keyed Fragment переносится между родителями',
+                fn: () => {
+                    const c = newContainer();
+                    let inits = 0;
+
+                    const Item = Component({
+                        init() { inits++; },
+                        render() { return h('span'); }
+                    });
+
+                    mount(
+                        h('div', null,
+                            h('div', { id: 'a' }, h(Fragment, { key: 'g' }, h(Item, { key: 'i' }))),
+                            h('div', { id: 'b' })
+                        ), c
+                    );
+                    assert(inits === 1, 'первый init: ' + inits);
+
+                    mount(
+                        h('div', null,
+                            h('div', { id: 'a' }),
+                            h('div', { id: 'b' }, h(Fragment, { key: 'g' }, h(Item, { key: 'i' })))
+                        ), c
+                    );
+                    assert(inits === 1, 'не должен пересоздаваться: ' + inits);
+                }
+            },
+            {
+                name: 'Fragment без key работает',
+                fn: () => {
+                    const c = newContainer();
+                    mount(
+                        h('div', null,
+                            h(Fragment, null,
+                                h('span', null, 'a'),
+                                h('span', null, 'b')
+                            )
+                        ), c
+                    );
+                    assert(c.querySelectorAll('span').length === 2, 'должно быть 2 span');
+                }
+            },
+            {
+                name: 'refresh() обновляет компоненты под HTML-корнем',
+                fn: async () => {
+                    const c = newContainer();
+                    let renderCount = 0;
+                    const MyComp = Component({
+                        render() { renderCount++; return h('span'); }
+                    });
+
+                    mount(h('div', null, h(MyComp)), c);
+                    const before = renderCount;
+                    await refresh();
+                    assert(renderCount > before, 'refresh должен обновить компонент');
+                }
+            },
+            {
+                name: 'refresh() возвращает время',
+                fn: async () => {
+                    const c = newContainer();
+                    const MyComp = Component({
+                        render() { return h('div'); }
+                    });
+                    mount(MyComp, c);
+                    const time = await refresh();
+                    assert(typeof time === 'number', 'должно быть число');
+                    assert(time >= 0, 'должно быть >= 0');
+                }
+            },
+            {
+                name: 'mount(null) размонтирует дерево',
+                fn: async () => {
+                    const c = newContainer();
+                    let unmounted = false;
+                    const MyComp = Component({
+                        onUnmounted() { unmounted = true; },
+                        render() { return h('div', null, 'content'); }
+                    });
+                    mount(MyComp, c);
+                    assert(c.firstChild, 'должно быть содержимое');
+                    mount(null, c);
+                    await delay(10);
+                    assert(unmounted === true, 'onUnmounted должен вызваться');
+                    assert(c.childNodes.length === 0, 'должно быть пусто');
+                }
+            },
+            {
+                name: 'update() внутри render() выдаёт ошибку',
+                fn: () => {
+                    const c = newContainer();
+                    const errors = [];
+                    const orig = console.error;
+                    console.error = (...args) => errors.push(args.join(' '));
+
+                    try {
+                        const MyComp = Component({
+                            render() { this.update(); return h('div'); }
+                        });
+                        mount(MyComp, c);
+                        const hasError = errors.some(e => e.includes('Cannot call update'));
+                        assert(hasError, 'должна быть ошибка: ' + errors.join(' | '));
+                    } finally {
+                        console.error = orig;
+                    }
+                }
+            },
+            {
+                name: 'Refs работают для DOM-элементов',
+                fn: () => {
+                    const c = newContainer();
+                    let inputRef = null;
+                    const MyComp = Component({
+                        render() {
+                            return h('input', { ref: this.refs('input') });
+                        }
+                    });
+                    const vnode = mount(MyComp, c);
+                    const inst = vnode._instance;
+                    inputRef = inst.refs.input;
+                    assert(inputRef !== null, 'ref должен быть установлен');
+                    assert(inputRef.tagName === 'INPUT', 'должен быть INPUT');
+                }
+            },
+            {
+                name: 'SVG namespace работает',
+                fn: () => {
+                    const c = newContainer();
+                    mount(
+                        h('svg', null,
+                            h('circle', { cx: 50, cy: 50, r: 40 })
+                        ), c
+                    );
+                    const svg = c.firstChild;
+                    assert(svg.tagName.toLowerCase() === 'svg', 'должен быть svg');
+                    assert(svg.namespaceURI === 'http://www.w3.org/2000/svg', 'namespace SVG');
+                }
+            }
+        ];
+
+        // Assert helper
+        function assert(cond, msg) {
+            if (!cond) throw new Error(msg || 'Assertion failed');
+        }
+
+        function delay(ms) {
+            return new Promise(r => setTimeout(r, ms));
+        }
+
+        // UI
+        const startBtn = document.getElementById('start');
+        const progressEl = document.getElementById('progress');
+        const log = document.getElementById('log');
+        const summary = document.getElementById('summary');
+
+        function addTestItem(name, status = 'pending', error = null) {
+            const div = document.createElement('div');
+            div.className = 'test-item ' + status;
+            const icons = { pass: '✅', fail: '❌', running: '⏳', pending: '○' };
+            div.innerHTML = `<span class="test-name">${icons[status]} ${name}</span>`;
+            if (error) {
+                div.innerHTML += `<div class="test-error">${escapeHtml(error)}</div>`;
+            }
+            log.appendChild(div);
+            return div;
+        }
+
+        function escapeHtml(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        async function runTests() {
+            startBtn.disabled = true;
+            log.innerHTML = '';
+            summary.innerHTML = '';
+            summary.className = '';
+            progressEl.className = 'visible';
+            progressEl.textContent = `Запуск ${tests.length} тестов...`;
+
+            let passed = 0, failed = 0;
+            const failures = [];
+
+            for (let i = 0; i < tests.length; i++) {
+                const test = tests[i];
+                progressEl.textContent = `Тест ${i + 1} из ${tests.length}: ${test.name}`;
+
+                const item = addTestItem(test.name, 'running');
+
+                await delay(5); // yield to UI
+
+                try {
+                    cleanup();
+                    await test.fn();
+                    item.className = 'test-item pass';
+                    item.innerHTML = `<span class="test-name">✅ ${test.name}</span>`;
+                    passed++;
+                } catch (err) {
+                    item.className = 'test-item fail';
+                    const msg = err.stack || err.message || String(err);
+                    item.innerHTML = `<span class="test-name">❌ ${test.name}</span>` +
+                        `<div class="test-error">${escapeHtml(msg)}</div>`;
+                    failed++;
+                    failures.push({ name: test.name, error: msg });
+                    console.error(`❌ ${test.name}:`, err);
+                }
+
+                item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+
+            cleanup();
+
+            progressEl.textContent = `Завершено за ${tests.length} тестов`;
+            summary.className = 'visible ' + (failed === 0 ? 'pass' : 'fail');
+
+            const html = `
+                <div style="margin-bottom: 12px;">
+                    <span class="stats">
+                        <span class="count" style="color: #27ae60;">${passed}</span>
+                        <span class="label">прошло</span>
+                    </span>
+                    <span class="stats">
+                        <span class="count" style="color: #e74c3c;">${failed}</span>
+                        <span class="label">провалено</span>
+                    </span>
+                    <span class="stats">
+                        <span class="count">${tests.length}</span>
+                        <span class="label">всего</span>
+                    </span>
+                </div>
+                <div>${failed === 0
+                    ? '🎉 Все тесты прошли успешно!'
+                    : `💔 Провалено ${failed} из ${tests.length} тестов`}</div>
+            `;
+            summary.innerHTML = html;
+
+            startBtn.disabled = false;
+        }
+
+        startBtn.onclick = runTests;
+    </script>
+</body>
+</html>

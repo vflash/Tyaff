@@ -1,0 +1,11 @@
+*..sass
+*..scss
+*..css
+*..js
+
+*.DS_Store
+*/.editorconfig
+*/.edit
+.idea
+
+node_modules/

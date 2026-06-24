@@ -16,5 +16,8 @@
     "src",
     "README.md",
     "logo.svg"
-  ]
+  ],
+  "devDependencies": {
+    "happy-dom": "^20.10.6"
+  }
 }

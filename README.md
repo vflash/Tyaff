@@ -66,7 +66,7 @@
 ## Установка
 
 ```javascript
-import { h, Component, createPortal, Fragment, mount, refresh } from './core.js';
+import { h, Component, createPortal, Fragment, mount, refresh } from 'tyaff';
 ```
 
 
