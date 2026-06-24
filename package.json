@@ -1,9 +1,9 @@
 {
   "name": "tyaff",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "VDOM library",
   "type": "module",
-  "main": "src/code.js",
+  "main": "src/core.js",
   "bugs": {
     "url": "https://github.com/vflash/tyaff/issues"
   },
