@@ -1,0 +1,1213 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VDOM Library Demo</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+      color: #333;
+    }
+    .container { max-width: 1400px; margin: 0 auto; }
+    header { text-align: center; color: white; margin-bottom: 40px; }
+    header h1 { font-size: 3em; margin-bottom: 10px; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }
+    header p { font-size: 1.2em; opacity: 0.9; }
+
+    .demo-section {
+      background: white;
+      border-radius: 12px;
+      padding: 30px;
+      margin-bottom: 30px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    }
+    .demo-section h2 {
+      color: #667eea;
+      margin-bottom: 20px;
+      font-size: 1.8em;
+      border-bottom: 3px solid #667eea;
+      padding-bottom: 10px;
+    }
+    .demo-section h3 { color: #764ba2; margin: 20px 0 10px 0; font-size: 1.3em; }
+
+    .demo-box {
+      background: #f8f9fa;
+      border: 2px solid #e9ecef;
+      border-radius: 8px;
+      padding: 20px;
+      margin: 15px 0;
+    }
+
+    button {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 1em;
+      margin: 5px;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    button:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(102,126,234,0.4); }
+    button:active { transform: translateY(0); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.danger { background: #e74c3c; }
+    button.danger:hover { background: #c0392b; }
+    button.success { background: #27ae60; }
+    button.success:hover { background: #229954; }
+
+    input, textarea, select {
+      padding: 10px;
+      border: 2px solid #ddd;
+      border-radius: 6px;
+      font-size: 1em;
+      margin: 5px;
+      transition: border-color 0.3s;
+    }
+    input:focus, textarea:focus, select:focus { outline: none; border-color: #667eea; }
+
+    .counter { font-size: 3em; font-weight: bold; color: #667eea; text-align: center; margin: 20px 0; }
+    .counter-controls { text-align: center; }
+
+    .theme-light { background: white; color: #333; padding: 20px; border-radius: 8px; }
+    .theme-dark { background: #2d3748; color: white; padding: 20px; border-radius: 8px; }
+    .btn-light { background: white; color: #333; border: 2px solid #ddd; }
+    .btn-dark { background: #2d3748; color: white; }
+
+    .todo-item {
+      display: flex;
+      align-items: center;
+      padding: 15px;
+      background: white;
+      border: 2px solid #e9ecef;
+      border-radius: 8px;
+      margin: 10px 0;
+      transition: all 0.3s;
+    }
+    .todo-item:hover { border-color: #667eea; box-shadow: 0 2px 8px rgba(102,126,234,0.2); }
+    .todo-item.completed { background: #f8f9fa; opacity: 0.7; }
+    .todo-item.completed span { text-decoration: line-through; color: #999; }
+    .todo-item input[type="checkbox"] { margin-right: 15px; width: 20px; height: 20px; cursor: pointer; }
+    .todo-item span { flex: 1; font-size: 1.1em; }
+    .todo-item button { background: #e74c3c; padding: 8px 15px; font-size: 0.9em; }
+
+    .todo-input-container { display: flex; gap: 10px; margin-bottom: 20px; }
+    .todo-input-container input { flex: 1; }
+
+    .stats {
+      background: #667eea;
+      color: white;
+      padding: 15px;
+      border-radius: 8px;
+      text-align: center;
+      font-size: 1.1em;
+      margin-top: 20px;
+    }
+
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .modal-content {
+      background: white;
+      border-radius: 12px;
+      padding: 40px;
+      max-width: 500px;
+      width: 90%;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    .modal-content h2 { color: #667eea; margin-bottom: 20px; }
+    .modal-content p { margin-bottom: 20px; line-height: 1.6; }
+
+    .lifecycle-log {
+      background: #2d3748;
+      color: #68d391;
+      padding: 15px;
+      border-radius: 8px;
+      font-family: 'Courier New', monospace;
+      max-height: 200px;
+      overflow-y: auto;
+      margin-top: 15px;
+    }
+    .lifecycle-log div { margin: 5px 0; }
+
+    .card {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 25px;
+      border-radius: 12px;
+      margin: 15px 0;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+    }
+    .card h3 { color: white; margin-bottom: 15px; }
+    .card p { opacity: 0.9; line-height: 1.6; }
+
+    .form-group { margin-bottom: 20px; }
+    .form-group label { display: block; margin-bottom: 8px; font-weight: bold; color: #555; }
+    .form-group input, .form-group textarea { width: 100%; }
+
+    .highlight { background: yellow; padding: 2px 5px; border-radius: 3px; }
+
+    .svg-demo { text-align: center; padding: 20px; }
+    .svg-demo svg { margin: 10px; transition: transform 0.3s; }
+    .svg-demo svg:hover { transform: scale(1.2); }
+
+    .reorder-list { display: flex; flex-direction: column; gap: 10px; }
+    .reorder-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px;
+      background: white;
+      border: 2px solid #e9ecef;
+      border-radius: 6px;
+    }
+    .reorder-item.dragging { opacity: 0.5; }
+
+    .batch-controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .batch-log {
+      background: #1a202c;
+      color: #63b3ed;
+      padding: 10px;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 0.9em;
+      max-height: 150px;
+      overflow-y: auto;
+      margin-top: 10px;
+    }
+
+    .memo-stats { display: flex; gap: 20px; margin-top: 15px; }
+    .memo-stat {
+      background: #667eea;
+      color: white;
+      padding: 10px 15px;
+      border-radius: 6px;
+      text-align: center;
+    }
+    .memo-stat .value { font-size: 1.5em; font-weight: bold; }
+
+    .context-chain { display: flex; gap: 10px; flex-wrap: wrap; }
+    .context-box {
+      padding: 15px;
+      border-radius: 8px;
+      border: 2px solid;
+    }
+    .context-box.level-1 { border-color: #667eea; background: #ebf4ff; }
+    .context-box.level-2 { border-color: #764ba2; background: #f3e8ff; }
+    .context-box.level-3 { border-color: #38b2ac; background: #e6fffa; }
+
+    .portal-container {
+      border: 3px dashed #667eea;
+      padding: 20px;
+      border-radius: 8px;
+      margin: 10px 0;
+      min-height: 100px;
+      background: #f8f9fa;
+    }
+
+    .large-list-container {
+      max-height: 300px;
+      overflow-y: auto;
+      border: 2px solid #e9ecef;
+      border-radius: 8px;
+    }
+    .large-item {
+      padding: 8px 12px;
+      border-bottom: 1px solid #eee;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .large-item:last-child { border-bottom: none; }
+
+    .test-result {
+      padding: 10px;
+      border-radius: 6px;
+      margin: 5px 0;
+      font-weight: bold;
+    }
+    .test-result.pass { background: #c6f6d5; color: #22543d; }
+    .test-result.fail { background: #fed7d7; color: #822727; }
+
+    .error-boundary {
+      border: 2px solid #e53e3e;
+      background: #fff5f5;
+      padding: 15px;
+      border-radius: 8px;
+      color: #c53030;
+    }
+
+    .foreign-object-demo {
+      border: 2px solid #667eea;
+      border-radius: 8px;
+      padding: 10px;
+      display: inline-block;
+    }
+
+    .grid-demo {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: 10px;
+      margin-top: 15px;
+    }
+    .grid-item {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+      padding: 15px;
+      border-radius: 8px;
+      text-align: center;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+    .grid-item:hover { transform: scale(1.05); }
+    .grid-item.selected {
+      box-shadow: 0 0 0 3px #229954, 0 5px 15px rgba(0,0,0,0.3);
+    }
+
+    .unmount-test {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .unmount-indicator {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #27ae60;
+      transition: background 0.3s;
+    }
+    .unmount-indicator.unmounted { background: #e74c3c; }
+
+    details { margin: 10px 0; }
+    summary { cursor: pointer; color: #667eea; font-weight: bold; }
+    summary:hover { color: #764ba2; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🚀 VDOM Library Demo</h1>
+      <p>Легковесная альтернатива React на чистом JavaScript</p>
+    </header>
+
+    <div id="app"></div>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="secondary-portal-root"></div>
+
+  <script type="module" src="../src/core.js"></script>
+  <script type="module">
+    import VDOM from '../src/core.js';
+    const { h, Component, createPortal, Fragment, mount } = VDOM;
+
+    // ============ 1. Counter Component ============
+    const Counter = Component({
+      count: 0,
+      step: 1,
+
+      increment() {
+        this.count += this.step;
+        this.update();
+      },
+
+      decrement() {
+        this.update({ count: this.count + this.step });
+      },
+
+      reset() {
+        this.update({ count: 0 });
+      },
+
+      render() {
+        return h('div', { className: 'demo-box' },
+          h('h3', null, '🔢 Счётчик с состоянием'),
+          h('div', { className: 'counter' }, this.count),
+          h('div', { className: 'counter-controls' },
+            h('button', { onClick: this.decrement }, '−'),
+            h('button', { onClick: this.reset }, 'Сброс'),
+            h('button', { onClick: this.increment }, '+')
+          ),
+          h('div', { style: { textAlign: 'center', marginTop: '15px' } },
+            h('label', null, 'Шаг: '),
+            h('input', {
+              type: 'number',
+              value: this.step,
+              style: { width: '80px' },
+              onChange: (e) => this.update({ step: parseInt(e.target.value) || 1 })
+            })
+          )
+        );
+      }
+    });
+
+    // ============ 2. Theme Context ============
+    const ThemeProvider = Component({
+      theme: 'light',
+
+      context: {
+        theme() { return this.theme; },
+        toggleTheme() {
+          this.update({ theme: this.theme === 'light' ? 'dark' : 'light' });
+        }
+      },
+
+      render() {
+        return h('div', { className: 'demo-box' },
+          h('h3', null, '🎨 Context API (Тема)'),
+          h('p', null, 'Текущая тема: ', h('span', { className: 'highlight' }, this.theme)),
+          this.props.children
+        );
+      }
+    });
+
+    const ThemedButton = Component({
+      render() {
+        const theme = this.context('theme');
+        const isDark = theme === 'dark';
+        return h('div', { className: isDark ? 'theme-dark' : 'theme-light' },
+          h('p', null, 'Я кнопка с темой из контекста!'),
+          h('button', {
+            className: isDark ? 'btn-dark' : 'btn-light',
+            onClick: () => this.context('toggleTheme')
+          }, 'Переключить тему')
+        );
+      }
+    });
+
+    const ThemeDemo = Component({
+      render() {
+        return h(ThemeProvider, null, h(ThemedButton, null));
+      }
+    });
+
+    // ============ 3. Portal (Modal) ============
+    const Modal = Component({
+      render() {
+        if (!this.props.visible) return null;
+        return createPortal(
+          h('div', { className: 'modal-overlay' },
+            h('div', { className: 'modal-content' },
+              h('h2', null, '🚪 Портал (Modal)'),
+              h('p', null, 'Этот компонент смонтирован в #modal-root через портал!'),
+              h('p', null, 'Порталы позволяют рендерить компоненты вне основной иерархии DOM.'),
+              h('button', { onClick: this.props.onClose }, 'Закрыть')
+            )
+          ),
+          () => document.getElementById('modal-root')
+        );
+      }
+    });
+
+    const PortalDemo = Component({
+      showModal: false,
+      toggleModal() { this.update({ showModal: !this.showModal }); },
+      render() {
+        return h('div', { className: 'demo-box' },
+          h('h3', null, '🚪 Порталы'),
+          h('p', null, 'Нажмите кнопку, чтобы открыть модальное окно:'),
+          h('button', { onClick: this.toggleModal }, 'Открыть Modal'),
+          h(Modal, { visible: this.showModal, onClose: this.toggleModal })
+        );
+      }
+    });
+
+    // ============ 4. Refs Demo ============
+    const RefsDemo = Component({
+      onMounted() {
+        if (this.refs.input) this.refs.input.focus();
+      },
+      selectText() { if (this.refs.input) this.refs.input.select(); },
+      clearInput() {
+        if (this.refs.input) {
+          this.refs.input.value = '';
+          this.refs.input.focus();
+        }
+      },
+      render() {
+        return h('div', { className: 'demo-box' },
+          h('h3', null, '📌 Refs (ссылки на DOM)'),
+          h('p', null, 'Refs позволяют напрямую работать с DOM-элементами:'),
+          h('input', {
+            ref: this.refs('input'),
+            type: 'text',
+            defaultValue: 'Кликните "Выделить" или "Очистить"',
+            style: { width: '100%', marginBottom: '10px' }
+          }),
+          h('div', null,
+            h('button', { onClick: this.selectText }, 'Выделить текст'),
+            h('button', { onClick: this.clearInput }, 'Очистить')
+          )
+        );
+      }
+    });
+
+    // ============ 5. Todo App ============
+    const TodoApp = Component({
+      todos: [
+        { id: 1, text: 'Изучить VDOM библиотеку', completed: false },
+        { id: 2, text: 'Создать свой проект', completed: false },
+        { id: 3, text: 'Написать документацию', completed: true }
+      ],
+      inputValue: '',
+
+      addTodo() {
+        if (!this.inputValue.trim()) return;
+        this.update({
+          todos: [...this.todos, { id: Date.now(), text: this.inputValue, completed: false }],
+          inputValue: ''
+        });
+      },
+
+      toggleTodo(id) {
+        this.update({
+          todos: this.todos.map(todo =>
+            todo.id === id ? { ...todo, completed: !todo.completed } : todo
+          )
+        });
+      },
+
+      deleteTodo(id) {
+        this.update({ todos: this.todos.filter(todo => todo.id !== id) });
+      },
+
+      handleKeyPress(e) { if (e.key === 'Enter') this.addTodo(); },
+
+      render() {
+        const completedCount = this.todos.filter(t => t.completed).length;
+        return h('div', { className: 'demo-box' },
+          h('h3', null, '✅ Todo приложение (списки с ключами)'),
+          h('div', { className: 'todo-input-container' },
+            h('input', {
+              type: 'text',
+              placeholder: 'Добавить задачу...',
+              value: this.inputValue,
+              onChange: (e) => this.update({ inputValue: e.target.value }),
+              onKeyPress: (e) => this.handleKeyPress(e)
+            }),
+            h('button', { onClick: () => this.addTodo() }, 'Добавить')
+          ),
+          h('div', null,
+            this.todos.map(todo =>
+              h('div', { key: todo.id, className: 'todo-item' + (todo.completed ? ' completed' : '') },
+                h('input', { type: 'checkbox', checked: todo.completed, onChange: () => this.toggleTodo(todo.id) }),
+                h('span', null, todo.text),
+                h('button', { onClick: () => this.deleteTodo(todo.id) }, 'Удалить')
+              )
+            )
+          ),
+          h('div', { className: 'stats' },
+            'Всего задач: ' + this.todos.length + ' | Выполнено: ' + completedCount
+          )
+        );
+      }
+    });
+
+    // ============ 6. Lifecycle Demo ============
+    const LifecycleLogger = Component({
+      logs: [],
+      addLog(message) {
+        this.update({ logs: [...this.logs, { time: new Date().toLocaleTimeString(), message }] });
+      },
+      forceUpdate() { this.refs.patient.up(); },
+      render() {
+        return h('div', { className: 'demo-box' },
+          h(LifecycleLogger_Patient, {
+            onInit: () => this.addLog('✓ init() - компонент инициализирован'),
+            onMounted: () => this.addLog('✓ onMounted() - компонент смонтирован в DOM'),
+            onUpdated: () => this.addLog('✓ onUpdated() - компонент обновлён'),
+            ref: this.refs('patient')
+          }),
+          h('h3', null, '🔄 Lifecycle методы'),
+          h('p', null, 'Демонстрация порядка вызова lifecycle методов:'),
+          h('button', { onClick: this.forceUpdate }, 'Принудительное обновление'),
+          h('div', { className: 'lifecycle-log' },
+            this.logs.map((log, i) => h('div', { key: i }, '[' + log.time + '] ' + log.message))
+          )
+        );
+      }
+    });
+
+    const LifecycleLogger_Patient = Component({
+      init(props) {
+        this._count = 0;
+        (props || this.props)?.onInit?.('');
+      },
+      memo() { return [this._count]; },
+      onMounted() { this.props.onMounted?.(''); },
+      onUpdated() { this.props.onUpdated?.(''); },
+      render() { return h('div'); },
+      up() { this.update({ _count: this._count + 1 }); }
+    });
+
+    // ============ 7. Card Component ============
+    const Card = Component({
+      render() {
+        return h('div', { className: 'card' },
+          h('h3', null, this.props.title),
+          h('p', null, this.props.children)
+        );
+      }
+    });
+
+    const CardsDemo = Component({
+      render() {
+        return h('div', { className: 'demo-box' },
+          h('h3', null, '🃏 Вложенные компоненты'),
+          h(Card, { title: '📦 Компонент 1' }, 'Это первый компонент с вложенным контентом.'),
+          h(Card, { title: '🎯 Компонент 2' }, 'Второй компонент демонстрирует передачу пропсов.'),
+          h(Card, { title: '⚡ Компонент 3' }, 'Третий компонент показывает композицию.')
+        );
+      }
+    });
+
+    // ============ 8. SVG Demo ============
+    const SVGIcon = Component({
+      render() {
+        return h('svg', { viewBox: '0 0 24 24', width: this.props.size || 48, height: this.props.size || 48, fill: this.props.color || '#667eea' },
+          h('path', { d: 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z' })
+        );
+      }
+    });
+
+    const SVGDemo = Component({
+      render() {
+        return h('div', { className: 'demo-box' },
+          h('h3', null, '🎨 SVG компоненты'),
+          h('p', null, 'Библиотека поддерживает SVG с правильными атрибутами:'),
+          h('div', { className: 'svg-demo' },
+            h(SVGIcon, { size: 48, color: '#e74c3c' }),
+            h(SVGIcon, { size: 64, color: '#3498db' }),
+            h(SVGIcon, { size: 80, color: '#2ecc71' }),
+            h(SVGIcon, { size: 96, color: '#f39c12' })
+          )
+        );
+      }
+    });
+
+    // ============ 9. Form Demo ============
+    const FormDemo = Component({
+      formData: { name: '', email: '', message: '' },
+      handleChange(field, value) {
+        this.update({ formData: { ...this.formData, [field]: value } });
+      },
+      handleSubmit(e) {
+        e.preventDefault();
+        alert('Форма отправлена!\n\nИмя: ' + this.formData.name + '\nEmail: ' + this.formData.email + '\nСообщение: ' + this.formData.message);
+      },
+      render() {
+        return h('div', { className: 'demo-box' },
+          h('h3', null, '📝 Формы с контролируемым вводом'),
+          h('form', { onSubmit: (e) => this.handleSubmit(e) },
+            h('div', { className: 'form-group' },
+              h('label', null, 'Имя:'),
+              h('input', { type: 'text', value: this.formData.name, onChange: (e) => this.handleChange('name', e.target.value), placeholder: 'Введите ваше имя' })
+            ),
+            h('div', { className: 'form-group' },
+              h('label', null, 'Email:'),
+              h('input', { type: 'email', value: this.formData.email, onChange: (e) => this.handleChange('email', e.target.value), placeholder: 'your@email.com' })
+            ),
+            h('div', { className: 'form-group' },
+              h('label', null, 'Сообщение:'),
+              h('textarea', { value: this.formData.message, onChange: (e) => this.handleChange('message', e.target.value), placeholder: 'Ваше сообщение...', rows: 4 })
+            ),
+            h('button', { type: 'submit', className: 'form-submit' }, 'Отправить')
+          )
+        );
+      }
+    });
+
+    // ============ 10. Fragment Demo ============
+    const FragmentDemo = Component({
+      render() {
+        return h('div', { className: 'demo-box' },
+          h('h3', null, '📦 Fragment (группировка без обёртки)'),
+          h('p', null, 'Fragment позволяет группировать элементы без дополнительного DOM-узла:'),
+          h('ul', null,
+            h(Fragment, null, h('li', null, 'Элемент 1'), h('li', null, 'Элемент 2'), h('li', null, 'Элемент 3')),
+            h(Fragment, null, h('li', null, 'Элемент 4'), h('li', null, 'Элемент 5'))
+          )
+        );
+      }
+    });
+
+    // ============ 11. Batch Update Test ============
+    const BatchTest = Component({
+      counter: 0,
+      logs: [],
+      rapidUpdate() {
+        // Множественные update в одном обработчике — должны объединиться в один render
+        this.update({ counter: this.counter + 1 });
+        this.update({ counter: this.counter + 2 });
+        this.update({ counter: this.counter + 3 });
+        this.logs = [...this.logs, 'Batch: ' + new Date().getTime()];
+        if (this.logs.length > 5) this.logs = this.logs.slice(-5);
+        this.update({ logs: this.logs });
+      },
+      render() {
+        return h('div', { className: 'demo-box' },
+          h('h3', null, '⚡ Batch Update (объединение обновлений)'),
+          h('p', null, 'Множественные update() в одном обработчике объединяются в один render:'),
+          h('div', { className: 'batch-controls' },
+            h('button', { onClick: this.rapidUpdate }, 'Быстрые обновления'),
+            h('span', null, 'Счётчик: ', h('strong', null, this.counter))
+          ),
+          h('div', { className: 'batch-log' },
+            this.logs.map((log, i) => h('div', { key: i }, log))
+          )
+        );
+      }
+    });
+
+    // ============ 12. Memo Optimization Test ============
+    const MemoTest = Component({
+      value: 0,
+      renderCount: 0,
+      memoCount: 0,
+
+      increment() {
+        this.update({ value: this.value + 1 });
+      },
+
+      memo() {
+        this.memoCount++;
+        return [this.value];
+      },
+
+      render() {
+        this.renderCount++;
+        return h('div', { className: 'demo-box' },
+          h('h3', null, '🎯 Memo Optimization'),
+          h('p', null, 'memo() предотвращает лишние рендеры при неизменных зависимостях:'),
+          h('div', { className: 'memo-stats' },
+            h('div', { className: 'memo-stat' },
+              h('div', { className: 'value' }, this.value),
+              h('div', null, 'Значение')
+            ),
+            h('div', { className: 'memo-stat' },
+              h('div', { className: 'value' }, this.memoCount),
+              h('div', null, 'Вызовов memo()')
+            ),
+            h('div', { className: 'memo-stat' },
+              h('div', { className: 'value' }, this.renderCount),
+              h('div', null, 'Вызовов render()')
+            )
+          ),
+          h('div', { style: { textAlign: 'center', marginTop: '15px' } },
+            h('button', { onClick: this.increment }, 'Увеличить значение')
+          ),
+          h('p', { style: { fontSize: '0.9em', color: '#666', marginTop: '10px' } },
+            'При одинаковом значении memo() вернёт те же зависимости → render() не вызывается'
+          )
+        );
+      }
+    });
+
+    // ============ 13. Key Reconciliation Test ============
+    const ReorderTest = Component({
+      items: [
+        { id: 'a', text: 'Элемент A' },
+        { id: 'b', text: 'Элемент B' },
+        { id: 'c', text: 'Элемент C' }
+      ],
+
+      shuffle() {
+        const shuffled = [...this.items].sort(() => Math.random() - 0.5);
+        this.update({ items: shuffled });
+      },
+
+      reverse() {
+        this.update({ items: [...this.items].reverse() });
+      },
+
+      render() {
+        return h('div', { className: 'demo-box' },
+          h('h3', null, '🔑 Key Reconciliation (перестановка с ключами)'),
+          h('p', null, 'Ключи сохраняют состояние компонентов при перестановке:'),
+          h('div', { className: 'reorder-list' },
+            this.items.map(item =>
+              h('div', { key: item.id, className: 'reorder-item' },
+                h('strong', null, item.id + ':'),
+                h('span', null, item.text),
+                h('input', {
+                  type: 'checkbox',
+                  onChange: () => { /* test state preservation */ }
+                })
+              )
+            )
+          ),
+          h('div', { style: { textAlign: 'center', marginTop: '15px' } },
+            h('button', { onClick: this.shuffle }, 'Перемешать'),
+            h('button', { onClick: this.reverse }, 'Обратить порядок')
+          )
+        );
+      }
+    });
+
+    // ============ 14. Conditional Render Test (null/[]) ============
+    const ConditionalRenderTest = Component({
+      showContent: true,
+      renderMode: 'vnode', // 'vnode', 'null', 'array'
+
+      toggleShow() { this.update({ showContent: !this.showContent }); },
+      changeMode(mode) { this.update({ renderMode: mode }); },
+
+      render() {
+        let content;
+        if (this.renderMode === 'null' && !this.showContent) {
+          content = null;
+        } else if (this.renderMode === 'array' && !this.showContent) {
+          content = [];
+        } else {
+          content = h('p', { style: { color: '#27ae60', fontWeight: 'bold' } }, '✅ Контент отображается');
+        }
+
+        return h('div', { className: 'demo-box' },
+          h('h3', null, '🔀 Conditional Render (null / [])'),
+          h('p', null, 'Тест возврата null и [] из render():'),
+          h('div', { style: { marginBottom: '15px' } },
+            h('label', null, 'Режим: '),
+            h('select', { value: this.renderMode, onChange: (e) => this.changeMode(e.target.value) },
+              h('option', { value: 'vnode' }, 'vnode'),
+              h('option', { value: 'null' }, 'null при скрытии'),
+              h('option', { value: 'array' }, '[] при скрытии')
+            )
+          ),
+          h('button', { onClick: this.toggleShow }, this.showContent ? 'Скрыть контент' : 'Показать контент'),
+          h('div', { style: { marginTop: '15px', minHeight: '40px' } }, content),
+          h('p', { style: { fontSize: '0.9em', color: '#666', marginTop: '10px' } },
+            'null и [] эквивалентны — ничего не рендерится, но компонент остаётся жив'
+          )
+        );
+      }
+    });
+
+    // ============ 15. Nested Context Test ============
+    const Level3 = Component({
+      render() {
+        const v1 = this.context('value1');
+        const v2 = this.context('value2');
+        const v3 = this.context('value3');
+        return h('div', { className: 'context-box level-3' },
+          h('strong', null, 'Level 3'),
+          h('br'),
+          'value1: ', h('code', null, v1), h('br'),
+          'value2: ', h('code', null, v2), h('br'),
+          'value3: ', h('code', null, v3)
+        );
+      }
+    });
+
+    const Level2 = Component({
+      context: { value2() { return 'B'; } },
+      render() {
+        return h('div', { className: 'context-box level-2' },
+          h('strong', null, 'Level 2'),
+          h('br'),
+          'value1: ', h('code', null, this.context('value1')),
+          h('div', { style: { marginTop: '10px' } }, h(Level3, null))
+        );
+      }
+    });
+
+    const Level1 = Component({
+      context: { value1() { return 'A'; } },
+      render() {
+        return h('div', { className: 'context-box level-1' },
+          h('strong', null, 'Level 1'),
+          h('br'),
+          'value1: ', h('code', null, this.context('value1')),
+          h('div', { style: { marginTop: '10px' } }, h(Level2, null))
+        );
+      }
+    });
+
+    const ContextChainDemo = Component({
+      context: { value3() { return 'C'; } },
+      render() {
+        return h('div', { className: 'demo-box' },
+          h('h3', null, '🔗 Nested Context (цепочка контекстов)'),
+          h('p', null, 'Контексты наследуются по цепочке провайдеров:'),
+          h('div', { className: 'context-chain' }, h(Level1, null)),
+          h('p', { style: { fontSize: '0.9em', color: '#666', marginTop: '10px' } },
+            'Level 1 → value1, Level 2 → value2, Level 3 → value3, все видят всё'
+          )
+        );
+      }
+    });
+
+    // ============ 16. Dynamic Portal Container Test ============
+    const DynamicPortal = Component({
+      render() {
+        return createPortal(
+          h('div', { style: { background: '#667eea', color: 'white', padding: '10px', borderRadius: '6px' } },
+            '🔄 Я в динамическом портале!'
+          ),
+          () => document.getElementById('secondary-portal-root')
+        );
+      }
+    });
+
+    const PortalContainerDemo = Component({
+      render() {
+        return h('div', { className: 'demo-box' },
+          h('h3', null, '🔄 Dynamic Portal Container'),
+          h('p', null, 'Портал монтируется в #secondary-portal-root:'),
+          h('div', { id: 'secondary-portal-root', className: 'portal-container' },
+            h('em', null, 'Здесь появится контент портала...')
+          ),
+          h(DynamicPortal, null)
+        );
+      }
+    });
+
+    // ============ 17. Large List Performance Test ============
+    const LargeList = Component({
+      items: Array.from({ length: 100 }, (_, i) => ({ id: i, text: 'Item ' + (i + 1) })),
+
+      addMore() {
+        const start = this.items.length;
+        const more = Array.from({ length: 50 }, (_, i) => ({ id: start + i, text: 'Item ' + (start + i + 1) }));
+        this.update({ items: [...this.items, ...more] });
+      },
+
+      render() {
+        return h('div', { className: 'demo-box' },
+          h('h3', null, '📊 Large List (100+ items)'),
+          h('p', null, 'Тест производительности с большим списком:'),
+          h('div', { className: 'large-list-container' },
+            this.items.map(item => h('div', { key: item.id, className: 'large-item' },
+              h('span', null, item.text),
+              h('small', { style: { color: '#999' } }, '#' + item.id)
+            ))
+          ),
+          h('button', { onClick: this.addMore, style: { marginTop: '15px' } }, 'Добавить ещё 50'),
+          h('p', { style: { fontSize: '0.9em', color: '#666', marginTop: '10px' } },
+            'Всего элементов: ', h('strong', null, this.items.length)
+          )
+        );
+      }
+    });
+
+    // ============ 18. Mount API Variants Test ============
+    const SimpleComponent = Component({
+      count: 0,
+      render() {
+        return h('div', { style: { padding: '10px', background: '#f0f0f0', borderRadius: '4px' } },
+          'Простой компонент, счёт: ', h('strong', null, this.count),
+          h('button', { onClick: () => this.update({ count: this.count + 1 }), style: { marginLeft: '10px' } }, '+')
+        );
+      }
+    });
+
+    const MountVariantsTest = Component({
+      onMounted() {
+        // Тест mount(App, container) — без h()
+        mount(SimpleComponent, document.getElementById('mount-test-1'));
+
+        // Тест mount([vnode1, vnode2], container) — массив
+        mount([
+          h('div', { style: { background: '#e8f4f8', padding: '10px', borderRadius: '4px', marginBottom: '5px' } }, '📦 Элемент из массива #1'),
+          h('div', { style: { background: '#e8f4f8', padding: '10px', borderRadius: '4px' } }, '📦 Элемент из массива #2')
+        ], document.getElementById('mount-test-2'));
+
+        // Тест mount('text', container) — текст
+        mount('📝 Текст через mount("hello", container)', document.getElementById('mount-test-3'));
+
+        // Тест mount(null, container) — unmount
+        const unmountContainer = document.getElementById('mount-test-4');
+        mount(h('div', null, 'Буду удалён через mount(null, container)'), unmountContainer);
+        setTimeout(() => {
+          mount(null, unmountContainer);
+          const indicator = document.getElementById('unmount-indicator');
+          if (indicator) indicator.classList.add('unmounted');
+        }, 2000);
+      },
+
+      render() {
+        return h('div', { className: 'demo-box' },
+          h('h3', null, '🔧 Mount API Variants'),
+          h('p', null, 'Тест различных форм вызова mount():'),
+
+          h('details', null,
+            h('summary', null, 'mount(Component, container) — конструктор'),
+            h('div', { id: 'mount-test-1', style: { marginTop: '10px' } })
+          ),
+
+          h('details', null,
+            h('summary', null, 'mount([vnode1, vnode2], container) — массив'),
+            h('div', { id: 'mount-test-2', style: { marginTop: '10px' } })
+          ),
+
+          h('details', null,
+            h('summary', null, 'mount("text", container) — строка'),
+            h('div', { id: 'mount-test-3', style: { marginTop: '10px' } })
+          ),
+
+          h('details', null,
+            h('summary', null, 'mount(null, container) — unmount'),
+            h('div', { className: 'unmount-test', style: { marginTop: '10px' } },
+              h('div', { id: 'mount-test-4' }),
+              h('span', null, 'Статус: '),
+              h('div', { id: 'unmount-indicator', className: 'unmount-indicator' })
+            )
+          ),
+
+          h('p', { style: { fontSize: '0.9em', color: '#666', marginTop: '15px' } },
+            'Все варианты работают корректно. Unmount происходит через 2 секунды.'
+          )
+        );
+      }
+    });
+
+    // ============ 19. Textarea & Select Multiple Test ============
+    const FormsAdvancedTest = Component({
+      textareaValue: 'Multi-line\ntextarea\nvalue',
+      selectValues: ['apple', 'banana'],
+
+      handleChange(e) {
+        this.update({ textareaValue: e.target.value });
+      },
+
+      handleSelect(e) {
+        const values = Array.from(e.target.selectedOptions, opt => opt.value);
+        this.update({ selectValues: values });
+      },
+
+      render() {
+        return h('div', { className: 'demo-box' },
+          h('h3', null, '📝 Advanced Forms (textarea, select multiple)'),
+
+          h('div', { className: 'form-group' },
+            h('label', null, 'Textarea (controlled):'),
+            h('textarea', {
+              value: this.textareaValue,
+              onChange: (e) => this.handleChange(e),
+              rows: 3,
+              placeholder: 'Введите текст...'
+            })
+          ),
+
+          h('div', { className: 'form-group' },
+            h('label', null, 'Select multiple:'),
+            h('select', {
+              multiple: true,
+              value: this.selectValues,
+              onChange: (e) => this.handleSelect(e),
+              size: 4
+            },
+              h('option', { value: 'apple' }, '🍎 Apple'),
+              h('option', { value: 'banana' }, '🍌 Banana'),
+              h('option', { value: 'cherry' }, '🍒 Cherry'),
+              h('option', { value: 'date' }, '🌴 Date')
+            ),
+            h('p', { style: { fontSize: '0.9em', color: '#666', marginTop: '5px' } },
+              'Выбрано: ', h('code', null, this.selectValues.join(', '))
+            )
+          ),
+
+          h('p', { style: { fontSize: '0.9em', color: '#666' } },
+            'Textarea игнорирует children, select multiple обрабатывает массив значений'
+          )
+        );
+      }
+    });
+
+    // ============ 20. foreignObject SVG Test ============
+    const ForeignObjectDemo = Component({
+      render() {
+        return h('div', { className: 'demo-box' },
+          h('h3', null, '🎨 SVG foreignObject (HTML внутри SVG)'),
+          h('p', null, 'foreignObject переключает детей обратно в HTML-режим:'),
+          h('svg', { viewBox: '0 0 200 100', style: { border: '2px solid #667eea', borderRadius: '8px' } },
+            h('rect', { x: 10, y: 10, width: 180, height: 80, fill: '#ebf4ff', stroke: '#667eea' }),
+            h('foreignObject', { x: 20, y: 20, width: 160, height: 60 },
+              h('div', { xmlns: 'http://www.w3.org/1999/xhtml', style: { color: '#333', fontSize: '14px' } },
+                '📦 HTML внутри SVG!',
+                h('br'),
+                h('button', { style: { marginTop: '5px', padding: '5px 10px' } }, 'Кнопка в foreignObject')
+              )
+            )
+          ),
+          h('p', { style: { fontSize: '0.9em', color: '#666', marginTop: '10px' } },
+            'foreignObject — специальное исключение: его дети рендерятся как HTML'
+          )
+        );
+      }
+    });
+
+    // ============ 21. Error Isolation Test ============
+    const ErrorProneComponent = Component({
+      shouldError: false,
+      toggleError() { this.update({ shouldError: !this.shouldError }); },
+      render() {
+        if (this.shouldError) {
+          throw new Error('Намеренная ошибка для теста изоляции');
+        }
+        return h('div', { style: { padding: '10px', background: '#c6f6d5', borderRadius: '4px' } },
+          '✅ Компонент работает нормально'
+        );
+      }
+    });
+
+    const ErrorIsolationDemo = Component({
+      render() {
+        return h('div', { className: 'demo-box' },
+          h('h3', null, '🛡️ Error Isolation'),
+          h('p', null, 'Один падающий компонент не ломает остальные:'),
+          h('div', { style: { marginBottom: '15px' } },
+            h('button', { onClick: () => this.refs.errorComp.toggleError() }, 'Вызвать ошибку в соседнем компоненте'),
+            h('button', { className: 'success', onClick: () => this.update() }, 'Перерендерить всё')
+          ),
+          h('div', { style: { display: 'flex', gap: '10px' } },
+            h('div', { style: { flex: 1 } },
+              h('strong', null, 'Стабильный компонент:'),
+              h(ErrorProneComponent, { ref: this.refs('errorComp') })
+            ),
+            h('div', { style: { flex: 1 } },
+              h('strong', null, 'Этот компонент жив:'),
+              h('div', { className: 'test-result pass' }, '✅ Всё работает!')
+            )
+          ),
+          h('p', { style: { fontSize: '0.9em', color: '#666', marginTop: '10px' } },
+            'При ошибке в одном компоненте остальные продолжают работать'
+          )
+        );
+      }
+    });
+
+    // ============ 22. File Input Read-Only Test ============
+    const FileInputTest = Component({
+      fileName: '',
+
+      handleFile(e) {
+        const file = e.target.files?.[0];
+        this.update({ fileName: file ? file.name : '' });
+      },
+
+      render() {
+        return h('div', { className: 'demo-box' },
+          h('h3', null, '📁 File Input (read-only)'),
+          h('p', null, 'File input value read-only — нельзя установить программно:'),
+          h('input', {
+            type: 'file',
+            onChange: (e) => this.handleFile(e)
+          }),
+          h('p', { style: { marginTop: '10px' } },
+            'Выбран файл: ', h('code', null, this.fileName || 'нет')
+          ),
+          h('p', { style: { fontSize: '0.9em', color: '#666', marginTop: '10px' } },
+            'Попытка установить value через update() игнорируется (как в React)'
+          )
+        );
+      }
+    });
+
+    // ============ 23. Grid Selection Test (Batch + Keys) ============
+    const GridItem = Component({
+      render() {
+        return h('div', {
+          className: 'grid-item' + (this.props.selected ? ' selected' : ''),
+          onClick: this.props.onClick
+        },
+          h('strong', null, this.props.label),
+          h('br'),
+          h('small', null, 'ID: ' + this.props.id)
+        );
+      }
+    });
+
+    const GridSelectionTest = Component({
+      selectedIds: [],
+      items: Array.from({ length: 12 }, (_, i) => ({ id: i, label: 'Item ' + (i + 1) })),
+
+      toggleSelect(id) {
+        const exists = this.selectedIds.includes(id);
+        this.update({
+          selectedIds: exists
+            ? this.selectedIds.filter(i => i !== id)
+            : [...this.selectedIds, id]
+        });
+      },
+
+      selectAll() {
+        this.update({ selectedIds: this.items.map(i => i.id) });
+      },
+
+      clearAll() {
+        this.update({ selectedIds: [] });
+      },
+
+      render() {
+        return h('div', { className: 'demo-box' },
+          h('h3', null, '🔲 Grid Selection (batch + keys)'),
+          h('p', null, 'Множественный выбор с сохранением состояния через keys:'),
+          h('div', { style: { marginBottom: '10px' } },
+            h('button', { onClick: this.selectAll }, 'Выбрать все'),
+            h('button', { onClick: this.clearAll }, 'Очистить'),
+            h('span', { style: { marginLeft: '15px', color: '#666' } },
+              'Выбрано: ', h('strong', null, this.selectedIds.length)
+            )
+          ),
+          h('div', { className: 'grid-demo' },
+            this.items.map(item =>
+              h(GridItem, {
+                key: item.id,
+                id: item.id,
+                label: item.label,
+                selected: this.selectedIds.includes(item.id),
+                onClick: () => this.toggleSelect(item.id)
+              })
+            )
+          )
+        );
+      }
+    });
+
+    // ============ Main App ============
+    const App = Component({
+      render() {
+        return h('div', null,
+          h(Counter, null),
+          h(ThemeDemo, null),
+          h(PortalDemo, null),
+          h(RefsDemo, null),
+          h(TodoApp, null),
+          h(LifecycleLogger, null),
+          h(CardsDemo, null),
+          h(SVGDemo, null),
+          h(FormDemo, null),
+          h(FragmentDemo, null),
+          h(BatchTest, null),
+          h(MemoTest, null),
+          h(ReorderTest, null),
+          h(ConditionalRenderTest, null),
+          h(ContextChainDemo, null),
+          h(PortalContainerDemo, null),
+          h(LargeList, null),
+          h(MountVariantsTest, null),
+          h(FormsAdvancedTest, null),
+          h(ForeignObjectDemo, null),
+          h(ErrorIsolationDemo, null),
+          h(FileInputTest, null),
+          h(GridSelectionTest, null)
+        );
+      }
+    });
+
+    // Mount the app
+    mount(h(App, null), document.getElementById('app'));
+  </script>
+</body>
+</html>

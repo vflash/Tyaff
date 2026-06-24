@@ -1,0 +1,20 @@
+{
+  "name": "tyaff",
+  "version": "0.0.2",
+  "description": "VDOM library",
+  "main": "src/code.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "js",
+    "vdom"
+  ],
+  "author": "Vopilovskiy Konstantin <flash.vkv@gmail.com>",
+  "license": "MIT",
+  "files": [
+    "src",
+    "README.md",
+    "logo.svg"
+  ]
+}
