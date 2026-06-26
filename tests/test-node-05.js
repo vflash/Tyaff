@@ -192,42 +192,8 @@ if (hasDOM) {
     // Key identifiers — формирование идентификаторов
     // =========================================================================
     describe('Key identifiers — формирование идентификаторов', () => {
-        test('key сохраняет instance среди siblings при reorder', async () => {
-            const container = createContainer();
-            const instances = [];
 
-            const Item = Component({
-                init() { instances.push(this); },
-                render(props) { return h('div', null, props.id); }
-            });
-
-            const App = Component({
-                order: [1, 2, 3],
-                render() {
-                    return h('div', null,
-                        this.order.map(id => h(Item, { key: id, id }))
-                    );
-                }
-            });
-
-            const vnode = mount(App, container);
-            const app = vnode._instance;
-
-            assert.equal(instances.length, 3);
-            const [a, b, c] = [...instances];
-
-            // Reorder среди того же родителя
-            app.update({ order: [3, 1, 2] });
-            await delay(20);
-
-            assert.equal(instances.length, 3, 'instance не должны пересоздаваться');
-            const items = Array.from(container.firstChild.children);
-            assert.equal(items[0].textContent, '3');
-            assert.equal(items[1].textContent, '1');
-            assert.equal(items[2].textContent, '2');
-        });
-
-        test('key с запятой экранируется — не конфликтует с другими keys', async () => {
+        test('user key с запятой экранируется — перемещение внутри render', async () => {
             const container = createContainer();
             const instances = [];
 
@@ -236,33 +202,71 @@ if (hasDOM) {
                 render(props) { return h('div', null, props.label); }
             });
 
-            // 'a,b' экранируется в '#a,,b' и не конфликтует с '#a' и '#b'
-            mount(
-                h('div', null,
-                    h(Item, { key: 'a,b', label: 'ab' }),
-                    h(Item, { key: 'a', label: 'a' }),
-                    h(Item, { key: 'b', label: 'b' })
-                ),
-                container
-            );
+            // Ключ 'fio,1' экранируется в '#fio,,1'
+            // Это предотвращает конфликт с путём ',1' (автоматический ключ позиции 1)
+            const App = Component({
+                showSpacer: false,
+                render() {
+                    return h('div', null,
+                        this.showSpacer && h('span', null, 'spacer'),
+                        h(Item, { key: 'fio,1', label: 'item' })
+                    );
+                }
+            });
 
-            assert.equal(instances.length, 3, 'должны быть 3 разных instance');
-
-            // Reorder — все должны сохраниться
-            mount(
-                h('div', null,
-                    h(Item, { key: 'b', label: 'b' }),
-                    h(Item, { key: 'a,b', label: 'ab' }),
-                    h(Item, { key: 'a', label: 'a' })
-                ),
-                container
-            );
+            const vnode = mount(App, container);
+            const app = vnode._instance;
             await delay(10);
 
-            assert.equal(instances.length, 3, 'instance не должны пересоздаваться');
+            assert.equal(instances.length, 1, 'один instance создан');
+            const firstInstance = instances[0];
 
-            const texts = Array.from(container.firstChild.children).map(el => el.textContent);
-            assert.deepEqual(texts, ['b', 'ab', 'a']);
+            // Добавляем spacer перед Item — Item перемещается с позиции 0 на позицию 1
+            // Внутри того же render — key должен сохранить instance
+            app.update({ showSpacer: true });
+            await delay(10);
+
+            assert.equal(instances.length, 1, 'instance не должен пересоздаваться');
+            assert.equal(instances[0], firstInstance, 'тот же instance');
+        });
+
+        test('дубликаты user key выводят warning', async () => {
+            const container = createContainer();
+            const warnings = [];
+            const origWarn = console.warn;
+            const origError = console.error;
+            console.warn = (...args) => warnings.push(args.join(' '));
+            console.error = (...args) => warnings.push(args.join(' '));
+
+            try {
+                const Item = Component({
+                    render() { return h('div'); }
+                });
+
+                const App = Component({
+                    render() {
+                        return h('div', null,
+                            h(Item, { key: 'duplicate' }),
+                            h(Item, { key: 'duplicate' })  // дубликат в одном render
+                        );
+                    }
+                });
+
+                mount(App, container);
+                await delay(10);
+
+                const hasWarning = warnings.some(w =>
+                    w.toLowerCase().includes('duplicate') &&
+                    w.toLowerCase().includes('key')
+                );
+                assert.ok(hasWarning,
+                    'должно быть предупреждение о дубликате. Вывод: ' +
+                    (warnings.length ? warnings.join(' | ') : '(пусто)')
+                );
+            } finally {
+                console.warn = origWarn;
+                console.error = origError;
+            }
         });
 
         test('автоматический ключ по пути сохраняется при том же порядке', async () => {
@@ -274,23 +278,25 @@ if (hasDOM) {
                 render(props) { return h('span', null, props.id); }
             });
 
-            mount(
-                h('div', null,
-                    h(Item, { id: 'a' }),
-                    h(Item, { id: 'b' })
-                ),
-                container
-            );
+            const App = Component({
+                render() {
+                    return h('div', null,
+                        h(Item, { id: 'a' }),
+                        h(Item, { id: 'b' })
+                    );
+                }
+            });
+
+            const vnode = mount(App, container);
+            const app = vnode._instance;
+            await delay(10);
+
             assert.equal(instances.length, 2);
 
             // Тот же порядок — instance сохраняются
-            mount(
-                h('div', null,
-                    h(Item, { id: 'a' }),
-                    h(Item, { id: 'b' })
-                ),
-                container
-            );
+            app.update({});  // force update
+            await delay(10);
+
             assert.equal(instances.length, 2, 'те же instance при том же порядке');
         });
 
@@ -303,13 +309,17 @@ if (hasDOM) {
                 render(props) { return h('div', null, props.id); }
             });
 
-            mount(
-                h('div', null,
-                    h(Item, { key: '0', id: 'user' }),
-                    h(Item, { id: 'auto' })
-                ),
-                container
-            );
+            const App = Component({
+                render() {
+                    return h('div', null,
+                        h(Item, { key: '0', id: 'user' }),   // user key '#0'
+                        h(Item, { id: 'auto' })              // automatic key ',1'
+                    );
+                }
+            });
+
+            mount(App, container);
+            await delay(10);
 
             assert.equal(instances.length, 2, 'оба должны создаться');
             assert.notEqual(instances[0], instances[1], 'разные instance');
@@ -336,26 +346,23 @@ if (hasDOM) {
                 'a,b,c,d,e'
             ];
 
-            mount(
-                h('div', null,
-                    ...specialKeys.map((key, i) =>
-                        h(Item, { key, id: i })
-                    )
-                ),
-                container
-            );
+            const App = Component({
+                order: specialKeys,
+                render() {
+                    return h('div', null,
+                        ...this.order.map((key, i) => h(Item, { key, id: i }))
+                    );
+                }
+            });
+
+            const vnode = mount(App, container);
+            const app = vnode._instance;
+            await delay(10);
 
             assert.equal(instances.length, specialKeys.length);
 
             // Reorder — все должны сохраниться
-            mount(
-                h('div', null,
-                    ...[...specialKeys].reverse().map((key, i) =>
-                        h(Item, { key, id: specialKeys.length - 1 - i })
-                    )
-                ),
-                container
-            );
+            app.update({ order: [...specialKeys].reverse() });
             await delay(10);
 
             assert.equal(instances.length, specialKeys.length,
@@ -371,33 +378,36 @@ if (hasDOM) {
                 render(props) { return h('div', null, props.id); }
             });
 
-            mount(
-                h('div', null,
-                    h(Item, { key: 'a,,b', id: 'double' }),
-                    h(Item, { key: 'a,b', id: 'single' })
-                ),
-                container
-            );
+            const App = Component({
+                order: ['double', 'single'],
+                render() {
+                    return h('div', null,
+                        this.order.map(id => {
+                            const key = id === 'double' ? 'a,,b' : 'a,b';
+                            return h(Item, { key, id });
+                        })
+                    );
+                }
+            });
+
+            const vnode = mount(App, container);
+            const app = vnode._instance;
+            await delay(10);
 
             assert.equal(instances.length, 2, 'должны быть 2 разных instance');
 
             // Reorder — оба должны сохраниться
-            mount(
-                h('div', null,
-                    h(Item, { key: 'a,b', id: 'single' }),
-                    h(Item, { key: 'a,,b', id: 'double' })
-                ),
-                container
-            );
+            app.update({ order: ['single', 'double'] });
             await delay(10);
 
             assert.equal(instances.length, 2, 'instance не должны пересоздаваться');
 
-            const texts = Array.from(container.firstChild.children).map(el => el.textContent);
+            const texts = Array.from(container.querySelector('div > div').children)
+                .map(el => el.textContent);
             assert.deepEqual(texts, ['single', 'double']);
         });
 
-        test('key сохраняется при добавлении/удалении siblings', async () => {
+        test('user key позволяет перемещать элемент между родителями внутри render', async () => {
             const container = createContainer();
             const instances = [];
 
@@ -406,34 +416,71 @@ if (hasDOM) {
                 render(props) { return h('div', null, props.id); }
             });
 
-            mount(
-                h('div', null,
-                    h(Item, { key: 'a', id: 'A' }),
-                    h(Item, { key: 'b', id: 'B' }),
-                    h(Item, { key: 'c', id: 'C' })
-                ),
-                container
-            );
+            const App = Component({
+                position: 'left',
+                render() {
+                    return h('div', null,
+                        h('div', { id: 'left' },
+                            this.position === 'left' && h(Item, { key: 'movable', id: 'item' })
+                        ),
+                        h('div', { id: 'right' },
+                            this.position === 'right' && h(Item, { key: 'movable', id: 'item' })
+                        )
+                    );
+                }
+            });
+
+            const vnode = mount(App, container);
+            const app = vnode._instance;
+            await delay(10);
+
+            assert.equal(instances.length, 1, 'один instance создан');
+            const firstInstance = instances[0];
+
+            // Перемещаем Item из #left в #right внутри того же render
+            app.update({ position: 'right' });
+            await delay(10);
+
+            assert.equal(instances.length, 1, 'instance не должен пересоздаваться');
+            assert.equal(instances[0], firstInstance, 'тот же instance после перемещения');
+        });
+
+        test('key сохраняет instance при reorder среди siblings внутри render', async () => {
+            const container = createContainer();
+            const instances = [];
+
+            const Item = Component({
+                init() { instances.push(this); },
+                render(props) { return h('div', null, props.id); }
+            });
+
+            const App = Component({
+                order: [1, 2, 3],
+                render() {
+                    return h('div', null,
+                        this.order.map(id => h(Item, { key: id, id }))
+                    );
+                }
+            });
+
+            const vnode = mount(App, container);
+            const app = vnode._instance;
+            await delay(10);
 
             assert.equal(instances.length, 3);
-            const [a, b, c] = [...instances];
 
-            // Удаляем средний
-            mount(
-                h('div', null,
-                    h(Item, { key: 'a', id: 'A' }),
-                    h(Item, { key: 'c', id: 'C' })
-                ),
-                container
-            );
-            await delay(10);
+            // Reorder внутри того же render компонента App
+            app.update({ order: [3, 1, 2] });
+            await delay(20);
 
             assert.equal(instances.length, 3, 'instance не должны пересоздаваться');
 
-            const texts = Array.from(container.firstChild.children).map(el => el.textContent);
-            assert.deepEqual(texts, ['A', 'C']);
+            const items = Array.from(container.querySelector('div > div').children);
+            assert.equal(items[0].textContent, '3');
+            assert.equal(items[1].textContent, '1');
+            assert.equal(items[2].textContent, '2');
         });
     });
 }
 
-console.log('\n✅ Test-node-05 инициализирован (15 тестов)\n');
+console.log('\n✅ Test-node-05 инициализирован (16 тестов)\n');

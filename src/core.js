@@ -86,13 +86,22 @@ function createPortal(children, containerGetter) {
 
 function Component(definition) {
     function ComponentClass() {
+        const reserved = [
+            'init', 'render', 'props', 'memo',
+            'onMounted', 'onUpdated', 'onUnmounted', 'context'
+        ];
+
         for (const key in definition) {
-            if (key === 'context') continue;
+            if (reserved.includes(key)) continue;  // ← пропускаем всё зарезервированное
+
             const val = definition[key];
-            if (typeof val !== 'function') {
+            if (typeof val === 'function') {
+                this[key] = val.bind(this);
+            } else {
                 this[key] = val;
             }
         }
+
         this._definition = definition;
         this._parentContext = null;
         this._incomingProps = null;
@@ -225,6 +234,8 @@ function attachInstanceAPI(inst) {
                 } finally {
                     this._isRendering = false;
                 }
+                // ⚠️ Проверяем дубликаты в новом vnode (отдельный Map)
+                checkDuplicateKeys(newVdom, '');
             } else {
                 newVdom = oldVdom;
             }
@@ -330,20 +341,6 @@ function attachInstanceAPI(inst) {
         }
         return this.context(key, ...args);
     };
-
-    const reserved = [
-        'init', 'render', 'props', 'memo',
-        'onMounted', 'onUpdated', 'onUnmounted', 'context',
-        'update', 'refs', 'contextSelf', '_rerender', '_scheduleUpdate'
-    ];
-    for (const key in def) {
-        const val = def[key];
-        if (typeof val === 'function' && !reserved.includes(key)) {
-            if (inst[key] === undefined) {
-                inst[key] = val.bind(inst);
-            }
-        }
-    }
 }
 
 function makeMapKey(vnode, index, path) {
@@ -354,6 +351,61 @@ function makeMapKey(vnode, index, path) {
     return path;
 }
 
+/**
+ * Проверяет дубликаты user keys в vnode (вызывается на newVdom).
+ * Использует свой временный Map, не влияет на keyMap для reconcile.
+ */
+function checkDuplicateKeys(vnode, path, seen) {
+    if (!seen) seen = new Map();
+    if (vnode == null) return;
+    if (Array.isArray(vnode)) {
+        for (let i = 0; i < vnode.length; i++) {
+            checkDuplicateKeys(vnode[i], path + ',' + i, seen);
+        }
+        return;
+    }
+    if (vnode._text !== undefined) return;
+
+    if (vnode.tag === Fragment) {
+        const hasKey = vnode.props && vnode.props.key !== undefined;
+        if (hasKey) {
+            const key = '#' + String(vnode.props.key).replace(/,/g, ',,');
+            if (seen.has(key)) {
+                console.warn(`⚠️ Warning: Duplicate key "${vnode.props.key}" detected in Fragment. Keys must be unique within a single render call.`);
+            } else {
+                seen.set(key, true);
+            }
+        }
+        const basePath = hasKey ? '' : path;
+        if (vnode.childs) {
+            for (let i = 0; i < vnode.childs.length; i++) {
+                checkDuplicateKeys(vnode.childs[i], basePath + ',' + i, seen);
+            }
+        }
+        return;
+    }
+
+    const hasKey = vnode.props && vnode.props.key !== undefined;
+    if (hasKey) {
+        const key = '#' + String(vnode.props.key).replace(/,/g, ',,');
+        if (seen.has(key)) {
+            console.warn(`⚠️ Warning: Duplicate key "${vnode.props.key}" detected. Keys must be unique within a single render call.`);
+        } else {
+            seen.set(key, true);
+        }
+    }
+
+    if (vnode.childs) {
+        for (let i = 0; i < vnode.childs.length; i++) {
+            checkDuplicateKeys(vnode.childs[i], path + ',' + i, seen);
+        }
+    }
+}
+
+/**
+ * Заполняет keyMap из старого vnode для последующего reconcile.
+ * Используется только для oldVdom.
+ */
 function populateKeyMap(vnode, path, keyMap) {
     if (vnode == null) return;
     if (Array.isArray(vnode)) {
@@ -369,9 +421,6 @@ function populateKeyMap(vnode, path, keyMap) {
 
         if (hasKey && vnode._instance) {
             const key = makeMapKey(vnode, 0, path);
-            if (keyMap.has(key)) {
-                console.warn(`⚠️ Warning: Duplicate key "${vnode.props.key}" detected in Fragment. Keys must be unique within a single render call.`);
-            }
             keyMap.set(key, vnode._instance);
         }
 
@@ -386,9 +435,6 @@ function populateKeyMap(vnode, path, keyMap) {
 
     if (vnode._instance) {
         const key = makeMapKey(vnode, 0, path);
-        if (keyMap.has(key)) {
-            console.warn(`⚠️ Warning: Duplicate key "${vnode.props.key}" detected. Keys must be unique within a single render call.`);
-        }
         keyMap.set(key, vnode._instance);
     }
 
@@ -667,8 +713,9 @@ function unmountVdom(vnode, seen = new WeakSet()) {
         const inst = vnode._instance;
         if (inst) {
             if (vnode.props && vnode.props.ref) vnode.props.ref(null);
+            // ⚠️ ЗАЩИТА: _definition может быть undefined (мусорный entry)
             const d = inst._definition;
-            if (d.onUnmounted) d.onUnmounted.call(inst);
+            if (d && d.onUnmounted) d.onUnmounted.call(inst);
             if (inst._vdom) unmountVdom(inst._vdom, seen);
         }
         return;
@@ -948,16 +995,17 @@ function buildIncomingProps(rawProps, childs) {
 function mountComponent(vnode, parentDOM, ctx, path, keyMap, namespace) {
     const def = vnode.tag._definition;
     const mapKey = makeMapKey(vnode, 0, path);
-    let inst = keyMap ? keyMap.get(mapKey) : null;
+    let found = keyMap ? keyMap.get(mapKey) : null;
 
-    if (inst && inst._definition !== def) {
-        unmountVdom({ tag: vnode.tag, _instance: inst });
+    // ⚠️ ФИЛЬТР: found может быть мусорным объектом без _definition
+    // (например, Fragment instance { _isKeyedFragment: true })
+    let inst = null;
+    if (found && found._definition === def) {
+        inst = found;
         if (keyMap) keyMap.delete(mapKey);
-        inst = null;
     }
 
     if (inst) {
-        keyMap.delete(mapKey);
         inst._incomingProps = buildIncomingProps(vnode.props, vnode.childs);
         inst._parentContext = ctx;
         inst._parentDOM = parentDOM;
@@ -1271,9 +1319,8 @@ function mount(input, container) {
     const flat = Array.isArray(nodes) ? nodes : (nodes ? [nodes] : []);
     prependAll(container, flat);
 
-    // Проверяем дубликаты ключей при первом mount
-    const keyMap = new Map();
-    populateKeyMap(vnode, '', keyMap);
+    // ⚠️ Проверяем дубликаты ключей при первом mount
+    checkDuplicateKeys(vnode, '');
 
     mountedTrees.set(container, vnode);
     mountedContainers.add(container);

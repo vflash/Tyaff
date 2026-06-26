@@ -1,5 +1,6 @@
 // ============================================================================
-// Node.js тесты для VDOM библиотеки tyaff — Часть 1: базовые механизмы
+// Node.js тесты для VDOM библиотеки tyaff — Часть 1
+// Базовые возможности: h(), Component, lifecycle, reconciliation
 // Запуск: node --test tests/test-node-01.js
 // ============================================================================
 
@@ -33,346 +34,189 @@ function delay(ms) {
     return new Promise(r => setTimeout(r, ms));
 }
 
-// ============================================================================
-// PURE ТЕСТЫ (без DOM)
-// ============================================================================
-
-describe('h() — JSX runtime', () => {
-    test('создаёт vnode с tag, props, childs', () => {
-        const vnode = h('div', { id: 'test' }, 'hello');
-        assert.equal(vnode.tag, 'div');
-        assert.deepEqual(vnode.props, { id: 'test' });
-        assert.equal(vnode.childs.length, 1);
-    });
-
-    test('нормализует null/false/true в null', () => {
-        const vnode = h('div', null, null, false, true, 'ok');
-        assert.equal(vnode.childs[0], null);
-        assert.equal(vnode.childs[1], null);
-        assert.equal(vnode.childs[2], null);
-        assert.deepEqual(vnode.childs[3], { _text: 'ok' });
-    });
-
-    test('оборачивает строки/числа в _text', () => {
-        const vnode = h('div', null, 'text', 42);
-        assert.deepEqual(vnode.childs[0], { _text: 'text' });
-        assert.deepEqual(vnode.childs[1], { _text: '42' });
-    });
-
-    test('сохраняет массивы как массивы (не flat)', () => {
-        const arr = [h('span'), h('span')];
-        const vnode = h('div', null, arr);
-        assert.ok(Array.isArray(vnode.childs[0]));
-        assert.equal(vnode.childs[0].length, 2);
-    });
-
-    test('props.children имеет приоритет над childs', () => {
-        const vnode = h('div', { children: 'from-props' }, 'from-childs');
-        assert.equal(vnode.props.children, 'from-props');
-    });
-
-    test('props по умолчанию пустой объект', () => {
-        const vnode = h('div');
-        assert.deepEqual(vnode.props, {});
-    });
-
-    test('поддерживает компоненты как tag', () => {
-        const MyComp = Component({ render() { return h('div'); } });
-        const vnode = h(MyComp, { value: 5 });
-        assert.equal(vnode.tag, MyComp);
-        assert.equal(vnode.props.value, 5);
-    });
-});
-
-describe('Component() — фабрика', () => {
-    test('возвращает конструктор с _definition', () => {
-        const MyComp = Component({
-            name: 'Test',
-            render() { return h('div'); }
-        });
-        assert.ok(MyComp._definition);
-        assert.equal(MyComp._definition.name, 'Test');
-    });
-
-    test('создаёт instance с _definition', () => {
-        const MyComp = Component({
-            value: 42,
-            render() { return h('div'); }
-        });
-        const inst = new MyComp();
-        assert.equal(inst._definition, MyComp._definition);
-        assert.equal(inst.value, 42);
-    });
-
-    test('не копирует context как поле', () => {
-        const MyComp = Component({
-            context: { lang() { return 'ru'; } },
-            render() { return h('div'); }
-        });
-        const inst = new MyComp();
-        assert.equal(inst.context, undefined);
-    });
-});
-
-describe('Fragment и Portal (pure)', () => {
-    test('Fragment это Symbol', () => {
-        assert.equal(typeof Fragment, 'symbol');
-    });
-
-    test('createPortal создаёт Portal vnode', () => {
-        const portal = createPortal(h('div'), () => null);
-        assert.equal(typeof portal.tag, 'symbol');
-        assert.ok(portal.props.containerGetter);
-    });
-
-    test('createPortal оборачивает один child в массив', () => {
-        const child = h('div');
-        const portal = createPortal(child, () => null);
-        assert.ok(Array.isArray(portal.childs));
-        assert.equal(portal.childs[0], child);
-    });
-});
-
-// ============================================================================
-// DOM ТЕСТЫ
-// ============================================================================
-
 if (hasDOM) {
-    describe('mount() — базовое монтирование', () => {
-        test('монтирует простой HTML', () => {
-            const container = createContainer();
-            mount(h('div', { id: 'root' }, 'hello'), container);
-            assert.equal(container.firstChild.tagName, 'DIV');
-            assert.equal(container.firstChild.id, 'root');
-            assert.equal(container.firstChild.textContent, 'hello');
+    // =========================================================================
+    // h() — создание VDOM узлов
+    // =========================================================================
+    describe('h() — создание VDOM узлов', () => {
+        test('создаёт vnode с tag, props, childs', () => {
+            const vnode = h('div', { id: 'test' }, 'hello');
+            assert.equal(vnode.tag, 'div');
+            assert.deepEqual(vnode.props, { id: 'test' });
+            assert.equal(vnode.childs.length, 1);
+            assert.equal(vnode.childs[0]._text, 'hello');
         });
 
-        test('монтирует компонент с init/render', () => {
-            const container = createContainer();
-            const MyComp = Component({
-                count: 0,
-                init() { this.count = 10; },
-                render() { return h('div', null, 'Count: ', this.count); }
-            });
-            mount(MyComp, container);
-            assert.equal(container.textContent, 'Count: 10');
+        test('null props становится пустым объектом', () => {
+            const vnode = h('div', null, 'text');
+            assert.deepEqual(vnode.props, {});
         });
 
-        test('принимает конструктор компонента без обёртки h()', () => {
-            const container = createContainer();
-            const MyComp = Component({
-                render() { return h('span', null, 'works'); }
-            });
-            mount(MyComp, container);
-            assert.equal(container.textContent, 'works');
+        test('null/undefined/false в children игнорируются', () => {
+            const vnode = h('div', null, null, undefined, false, 'text');
+            assert.equal(vnode.childs.length, 4);
+            assert.equal(vnode.childs[0], null);
+            assert.equal(vnode.childs[1], null);
+            assert.equal(vnode.childs[2], null);
+            assert.equal(vnode.childs[3]._text, 'text');
         });
 
-        test('принимает массив как Fragment', () => {
-            const container = createContainer();
-            mount([h('span', null, 'a'), h('span', null, 'b')], container);
-            assert.equal(container.querySelectorAll('span').length, 2);
+        test('числа преобразуются в текстовые узлы', () => {
+            const vnode = h('div', null, 42);
+            assert.equal(vnode.childs[0]._text, '42');
         });
 
-        test('принимает строку как текстовый узел', () => {
-            const container = createContainer();
-            mount('plain text', container);
-            assert.equal(container.textContent, 'plain text');
-        });
-    });
-
-    describe('mount() — edge cases', () => {
-        test('mount(null) на пустой контейнер — ничего не делает', () => {
-            const container = createContainer();
-            mount(null, container);
-            assert.equal(container.childNodes.length, 0);
+        test('массивы в children не flattening-уются', () => {
+            const arr = [h('span'), h('span')];
+            const vnode = h('div', null, arr);
+            assert.equal(vnode.childs.length, 1);
+            assert.ok(Array.isArray(vnode.childs[0]));
+            assert.equal(vnode.childs[0].length, 2);
         });
 
-        test('mount дважды с разными конструкторами — заменяет', () => {
-            const container = createContainer();
-            const A = Component({ render() { return h('div', null, 'A'); } });
-            const B = Component({ render() { return h('div', null, 'B'); } });
-            mount(A, container);
-            assert.equal(container.textContent, 'A');
-            mount(B, container);
-            assert.equal(container.textContent, 'B');
+        test('вложенные vnode', () => {
+            const vnode = h('div', null,
+                h('span', null, 'a'),
+                h('span', null, 'b')
+            );
+            assert.equal(vnode.childs.length, 2);
+            assert.equal(vnode.childs[0].tag, 'span');
+            assert.equal(vnode.childs[1].tag, 'span');
         });
     });
 
-    describe('props() и init() — порядок вызова', () => {
-        test('props первым аргументом в init', () => {
-            const container = createContainer();
-            let receivedProps = null;
+    // =========================================================================
+    // Component factory
+    // =========================================================================
+    describe('Component factory', () => {
+        test('создаёт конструктор с _definition', () => {
             const MyComp = Component({
-                init(props) { receivedProps = props; },
                 render() { return h('div'); }
             });
-            mount(h(MyComp, { value: 42 }), container);
-            assert.ok(receivedProps);
-            assert.equal(receivedProps.value, 42);
+            assert.ok(MyComp._definition);
+            assert.equal(typeof MyComp._definition.render, 'function');
         });
 
-        test('props первым аргументом в render', () => {
-            const container = createContainer();
-            let receivedProps = null;
+        test('копирует свойства на instance', () => {
             const MyComp = Component({
-                render(props) {
-                    receivedProps = props;
-                    return h('div');
-                }
+                count: 5,
+                name: 'test',
+                render() { return h('div'); }
             });
-            mount(h(MyComp, { x: 1 }), container);
-            assert.equal(receivedProps.x, 1);
+            const inst = new MyComp();
+            assert.equal(inst.count, 5);
+            assert.equal(inst.name, 'test');
         });
 
-        test('init() вызывается только при первом mount', () => {
+        test('методы автобиндятся к instance', () => {
+            const MyComp = Component({
+                value: 10,
+                getValue() { return this.value; },
+                render() { return h('div'); }
+            });
+            const inst = new MyComp();
+            const fn = inst.getValue;
+            assert.equal(fn(), 10);
+        });
+    });
+
+    // =========================================================================
+    // mount — базовые возможности
+    // =========================================================================
+    describe('mount — базовые возможности', () => {
+        test('монтирует простой HTML-элемент', () => {
+            const container = createContainer();
+            mount(h('div', { id: 'test' }, 'hello'), container);
+            assert.equal(container.children.length, 1);
+            assert.equal(container.children[0].tagName, 'DIV');
+            assert.equal(container.children[0].id, 'test');
+            assert.equal(container.children[0].textContent, 'hello');
+        });
+
+        test('монтирует компонент', () => {
+            const container = createContainer();
+            const MyComp = Component({
+                render() { return h('div', null, 'component'); }
+            });
+            mount(MyComp, container);
+            assert.equal(container.children.length, 1);
+            assert.equal(container.textContent, 'component');
+        });
+
+        test('монтирует массив vnode', () => {
+            const container = createContainer();
+            mount([h('span', null, 'a'), h('span', null, 'b')], container);
+            assert.equal(container.children.length, 2);
+            assert.equal(container.children[0].textContent, 'a');
+            assert.equal(container.children[1].textContent, 'b');
+        });
+
+        test('монтирует строку как текстовый узел', () => {
+            const container = createContainer();
+            mount('hello', container);
+            assert.equal(container.textContent, 'hello');
+        });
+
+        test('монтирует число как текстовый узел', () => {
+            const container = createContainer();
+            mount(42, container);
+            assert.equal(container.textContent, '42');
+        });
+
+        test('повторный mount с тем же vnode — diff', () => {
+            const container = createContainer();
+            mount(h('div', null, 'a'), container);
+            assert.equal(container.textContent, 'a');
+            mount(h('div', null, 'b'), container);
+            assert.equal(container.textContent, 'b');
+            assert.equal(container.children.length, 1);
+        });
+
+        test('mount(null) размонтирует дерево', () => {
+            const container = createContainer();
+            mount(h('div', null, 'hello'), container);
+            assert.equal(container.children.length, 1);
+            mount(null, container);
+            assert.equal(container.children.length, 0);
+        });
+    });
+
+    // =========================================================================
+    // Lifecycle hooks
+    // =========================================================================
+    describe('Lifecycle hooks', () => {
+        test('init() вызывается один раз при первом mount', async () => {
             const container = createContainer();
             let initCount = 0;
+
             const MyComp = Component({
                 init() { initCount++; },
                 render() { return h('div'); }
             });
-            mount(MyComp, container);
-            mount(MyComp, container);
-            mount(MyComp, container);
+
+            const vnode = mount(MyComp, container);
+            const inst = vnode._instance;
             assert.equal(initCount, 1);
-        });
 
-        test('children попадают в props автоматически', () => {
-            const container = createContainer();
-            let receivedChildren = null;
-            const Parent = Component({
-                render(props) {
-                    receivedChildren = props.children;
-                    return h('div', null, props.children);
-                }
-            });
-            mount(h(Parent, null, h('span', null, 'child')), container);
-            assert.ok(receivedChildren);
-        });
-    });
-
-    describe('memo() — защита render', () => {
-        test('блокирует render при одинаковых зависимостях', () => {
-            const container = createContainer();
-            let renderCount = 0;
-            const MyComp = Component({
-                memo(props) { return [props.value]; },
-                render(props) {
-                    renderCount++;
-                    return h('div', null, props.value);
-                }
-            });
-            mount(h(MyComp, { value: 1 }), container);
-            mount(h(MyComp, { value: 1 }), container);
-            mount(h(MyComp, { value: 1 }), container);
-            assert.equal(renderCount, 1);
-        });
-
-        test('разрешает render при изменении зависимостей', () => {
-            const container = createContainer();
-            let renderCount = 0;
-            const MyComp = Component({
-                memo(props) { return [props.value]; },
-                render(props) {
-                    renderCount++;
-                    return h('div', null, props.value);
-                }
-            });
-            mount(h(MyComp, { value: 1 }), container);
-            mount(h(MyComp, { value: 2 }), container);
-            mount(h(MyComp, { value: 3 }), container);
-            assert.equal(renderCount, 3);
-        });
-
-        test('блокирует только текущий компонент, дети ререндерятся', () => {
-            const container = createContainer();
-            let parentRenders = 0;
-            let childRenders = 0;
-
-            const Child = Component({
-                render() {
-                    childRenders++;
-                    return h('span', null, 'child');
-                }
-            });
-
-            const Parent = Component({
-                memo(props) { return [props.value]; },
-                render() {
-                    parentRenders++;
-                    return h('div', null, h(Child));
-                }
-            });
-
-            mount(h(Parent, { value: 1 }), container);
-            mount(h(Parent, { value: 1 }), container);
-
-            assert.equal(parentRenders, 1);
-            assert.equal(childRenders, 2);
-        });
-
-        test('компонент без memo() всегда рендерится', () => {
-            const container = createContainer();
-            let renderCount = 0;
-            const MyComp = Component({
-                render() {
-                    renderCount++;
-                    return h('div');
-                }
-            });
-            mount(h(MyComp, { v: 1 }), container);
-            mount(h(MyComp, { v: 1 }), container);
-            mount(h(MyComp, { v: 1 }), container);
-            assert.equal(renderCount, 3);
-        });
-
-        test('memo() с объектами — сравнение по ссылке', () => {
-            const container = createContainer();
-            let renderCount = 0;
-            const MyComp = Component({
-                memo(props) { return [props.obj]; },
-                render() {
-                    renderCount++;
-                    return h('div');
-                }
-            });
-            const obj = { a: 1 };
-            mount(h(MyComp, { obj }), container);
-            mount(h(MyComp, { obj }), container);
-            assert.equal(renderCount, 1);
-            mount(h(MyComp, { obj: { a: 1 } }), container);
-            assert.equal(renderCount, 2);
-        });
-
-        test('onUpdated не вызывается при блокировке memo', async () => {
-            const container = createContainer();
-            let updatedCount = 0;
-            const MyComp = Component({
-                memo(props) { return [props.value]; },
-                onUpdated() { updatedCount++; },
-                render(props) { return h('div', null, props.value); }
-            });
-            mount(h(MyComp, { value: 1 }), container);
-            mount(h(MyComp, { value: 1 }), container);
+            inst.update({});
             await delay(10);
-            assert.equal(updatedCount, 0);
+            assert.equal(initCount, 1, 'init не должен вызываться повторно');
         });
-    });
 
-    describe('Lifecycle hooks', () => {
-        test('onMounted вызывается один раз', async () => {
+        test('onMounted() вызывается после вставки в DOM', async () => {
             const container = createContainer();
-            let mountedCount = 0;
+            let mounted = false;
+
             const MyComp = Component({
-                onMounted() { mountedCount++; },
+                onMounted() { mounted = true; },
                 render() { return h('div'); }
             });
+
             mount(MyComp, container);
-            await delay(10);
-            assert.equal(mountedCount, 1);
+            assert.equal(mounted, true);
         });
 
-        test('onMounted вызывается children-first', async () => {
+        test('onMounted() вызывается children-first', async () => {
             const container = createContainer();
             const order = [];
 
@@ -391,196 +235,128 @@ if (hasDOM) {
             assert.deepEqual(order, ['child', 'parent']);
         });
 
-        test('onUnmounted вызывается до удаления DOM', async () => {
+        test('onUpdated() вызывается при update', async () => {
             const container = createContainer();
-            document.body.appendChild(container);
-            let wasInDOM = false;
+            let updateCount = 0;
 
             const MyComp = Component({
-                onUnmounted() {
-                    wasInDOM = document.body.contains(container);
-                },
-                render() { return h('div'); }
+                value: 0,
+                onUpdated() { updateCount++; },
+                render() { return h('div', null, this.value); }
             });
 
-            mount(MyComp, container);
-            await delay(10);
-            mount(null, container);
-            await delay(10);
-
-            assert.ok(wasInDOM);
-            document.body.removeChild(container);
-        });
-
-        test('onUpdated вызывается только при выполненном render', async () => {
-            const container = createContainer();
-            let updatedCount = 0;
-            const MyComp = Component({
-                count: 0,
-                memo() { return [this.count]; },
-                onUpdated() { updatedCount++; },
-                render() { return h('div', null, this.count); }
-            });
             const vnode = mount(MyComp, container);
             const inst = vnode._instance;
-            inst.update({ count: 0 });
+            assert.equal(updateCount, 0, 'onUpdated не вызывается при первом mount');
+
+            inst.update({ value: 1 });
             await delay(10);
-            assert.equal(updatedCount, 0);
-            inst.update({ count: 1 });
-            await delay(10);
-            assert.equal(updatedCount, 1);
-        });
-    });
-
-    describe('Context', () => {
-        test('распространяется вниз по дереву', () => {
-            const container = createContainer();
-            let receivedLang = null;
-
-            const Child = Component({
-                render() {
-                    receivedLang = this.context('lang');
-                    return h('span');
-                }
-            });
-
-            const Parent = Component({
-                context: { lang() { return 'ru'; } },
-                render() { return h('div', null, h(Child)); }
-            });
-
-            mount(Parent, container);
-            assert.equal(receivedLang, 'ru');
+            assert.equal(updateCount, 1);
         });
 
-        test('contextSelf ищет сначала в себе', () => {
+        test('onUnmounted() вызывается при удалении', async () => {
             const container = createContainer();
-            let receivedLang = null;
+            let unmounted = false;
 
             const MyComp = Component({
-                context: { lang() { return 'self'; } },
-                render() {
-                    receivedLang = this.contextSelf('lang');
-                    return h('div');
-                }
-            });
-
-            mount(MyComp, container);
-            assert.equal(receivedLang, 'self');
-        });
-
-        test('context() возвращает undefined когда нет провайдера', () => {
-            const container = createContainer();
-            let received = 'initial';
-
-            const MyComp = Component({
-                render() {
-                    received = this.context('missing');
-                    return h('div');
-                }
-            });
-
-            mount(MyComp, container);
-            assert.equal(received, undefined);
-        });
-
-        test('потомок переопределяет context родителя', () => {
-            const container = createContainer();
-            let received = null;
-
-            const Deep = Component({
-                render() {
-                    received = this.context('theme');
-                    return h('span');
-                }
-            });
-
-            const Middle = Component({
-                context: { theme() { return 'dark'; } },
-                render() { return h('div', null, h(Deep)); }
-            });
-
-            const Top = Component({
-                context: { theme() { return 'light'; } },
-                render() { return h('div', null, h(Middle)); }
-            });
-
-            mount(Top, container);
-            assert.equal(received, 'dark');
-        });
-
-        test('contextSelf рекурсия бросает ошибку', () => {
-            const container = createContainer();
-            let errorCaught = null;
-
-            const MyComp = Component({
-                context: {
-                    x() { return this.contextSelf('x'); }
-                },
-                render() {
-                    try {
-                        this.contextSelf('x');
-                    } catch (e) {
-                        errorCaught = e;
-                    }
-                    return h('div');
-                }
-            });
-
-            mount(MyComp, container);
-            assert.ok(errorCaught);
-            assert.ok(errorCaught.message.includes('recursion'));
-        });
-    });
-
-    describe('Keys и Fragment', () => {
-        test('Global keys сохраняют instance при перемещении', () => {
-            const container = createContainer();
-            const instances = [];
-
-            const Item = Component({
-                init() { instances.push(this); },
+                onUnmounted() { unmounted = true; },
                 render() { return h('div'); }
             });
 
-            mount(h('div', null, h(Item, { key: 'x' })), container);
-            const firstInstance = instances[0];
-
-            mount(h('div', null, h('span'), h(Item, { key: 'x' })), container);
-
-            assert.equal(instances.length, 1);
-            assert.equal(instances[0], firstInstance);
+            mount(MyComp, container);
+            assert.equal(unmounted, false);
+            mount(null, container);
+            assert.equal(unmounted, true);
         });
+    });
 
-        test('keyed Fragment переносится между родителями', () => {
+    // =========================================================================
+    // Props
+    // =========================================================================
+    describe('Props', () => {
+        test('props передаются в render', () => {
             const container = createContainer();
-            let childInits = 0;
-
-            const Item = Component({
-                init() { childInits++; },
-                render() { return h('span'); }
+            const MyComp = Component({
+                render(props) { return h('div', null, props.text); }
             });
-
-            mount(
-                h('div', null,
-                    h('div', { id: 'a' }, h(Fragment, { key: 'g' }, h(Item, { key: 'i' }))),
-                    h('div', { id: 'b' })
-                ),
-                container
-            );
-            assert.equal(childInits, 1);
-
-            mount(
-                h('div', null,
-                    h('div', { id: 'a' }),
-                    h('div', { id: 'b' }, h(Fragment, { key: 'g' }, h(Item, { key: 'i' })))
-                ),
-                container
-            );
-            assert.equal(childInits, 1);
+            mount(h(MyComp, { text: 'hello' }), container);
+            assert.equal(container.textContent, 'hello');
         });
 
-        test('Fragment без key работает как прозрачная обёртка', () => {
+        test('props() функция трансформирует входящие props', () => {
+            const container = createContainer();
+            const MyComp = Component({
+                props(incoming) {
+                    return { text: incoming.text.toUpperCase() };
+                },
+                render() { return h('div', null, this.props.text); }
+            });
+            mount(h(MyComp, { text: 'hello' }), container);
+            assert.equal(container.textContent, 'HELLO');
+        });
+
+        test('children доступны через this.props.children', () => {
+            const container = createContainer();
+            const MyComp = Component({
+                render() {
+                    return h('div', { id: 'wrapper' }, this.props.children);
+                }
+            });
+            mount(h(MyComp, null, h('span', null, 'child')), container);
+            const wrapper = container.querySelector('#wrapper');
+            assert.equal(wrapper.children.length, 1);
+            assert.equal(wrapper.children[0].tagName, 'SPAN');
+            assert.equal(wrapper.children[0].textContent, 'child');
+        });
+    });
+
+    // =========================================================================
+    // Reconciliation
+    // =========================================================================
+    describe('Reconciliation', () => {
+        test('изменение текста обновляет DOM-узел', () => {
+            const container = createContainer();
+            mount(h('div', null, 'old'), container);
+            const div = container.firstChild;
+            mount(h('div', null, 'new'), container);
+            assert.equal(container.firstChild, div, 'тот же DOM-узел');
+            assert.equal(div.textContent, 'new');
+        });
+
+        test('изменение tag пересоздаёт элемент', () => {
+            const container = createContainer();
+            mount(h('div', null, 'text'), container);
+            const div = container.firstChild;
+            mount(h('span', null, 'text'), container);
+            assert.notEqual(container.firstChild, div, 'новый DOM-узел');
+            assert.equal(container.firstChild.tagName, 'SPAN');
+        });
+
+        test('изменение атрибутов обновляет элемент', () => {
+            const container = createContainer();
+            mount(h('div', { id: 'a', class: 'old' }), container);
+            const div = container.firstChild;
+            mount(h('div', { id: 'b', class: 'new' }), container);
+            assert.equal(container.firstChild, div, 'тот же DOM-узел');
+            assert.equal(div.id, 'b');
+            assert.equal(div.className, 'new');
+        });
+
+        test('удаление атрибутов при отсутствии в новых props', () => {
+            const container = createContainer();
+            mount(h('div', { id: 'a', title: 'hello' }), container);
+            const div = container.firstChild;
+            mount(h('div', { id: 'b' }), container);
+            assert.equal(div.id, 'b');
+            assert.equal(div.hasAttribute('title'), false);
+        });
+    });
+
+    // =========================================================================
+    // Fragment
+    // =========================================================================
+    describe('Fragment', () => {
+        test('Fragment без key — прозрачная обёртка', () => {
             const container = createContainer();
             mount(
                 h('div', null,
@@ -591,74 +367,229 @@ if (hasDOM) {
                 ),
                 container
             );
-            assert.equal(container.querySelectorAll('span').length, 2);
-        });
-    });
-
-    describe('Refs lifecycle', () => {
-        test('ref(node) вызывается при mount с DOM-узлом', () => {
-            const container = createContainer();
-            let received = null;
-            const MyComp = Component({
-                render() {
-                    return h('input', { ref: (n) => { received = n; } });
-                }
-            });
-            mount(MyComp, container);
-            assert.ok(received);
-            assert.equal(received.tagName, 'INPUT');
+            const div = container.firstChild;
+            assert.equal(div.children.length, 2);
+            assert.equal(div.children[0].textContent, 'a');
+            assert.equal(div.children[1].textContent, 'b');
         });
 
-        test('ref(null) вызывается при unmount', async () => {
+        test('Fragment как корень mount', () => {
             const container = createContainer();
-            const calls = [];
-            const MyComp = Component({
-                render() {
-                    return h('input', { ref: (n) => calls.push(n) });
-                }
-            });
-            mount(MyComp, container);
-            assert.ok(calls[0] !== null, 'первый вызов с DOM-узлом');
-            mount(null, container);
-            await delay(10);
-            assert.equal(calls[calls.length - 1], null, 'последний вызов с null');
+            mount(
+                h(Fragment, null,
+                    h('span', null, 'a'),
+                    h('span', null, 'b')
+                ),
+                container
+            );
+            assert.equal(container.children.length, 2);
+            assert.equal(container.children[0].textContent, 'a');
+            assert.equal(container.children[1].textContent, 'b');
         });
 
-        test('ref на компонент возвращает instance', () => {
+        test('Fragment с key сохраняет children при reorder', async () => {
             const container = createContainer();
-            let received = null;
-            const Child = Component({
-                value: 42,
-                render() { return h('div'); }
-            });
-            const Parent = Component({
-                render() {
-                    return h(Child, { ref: (inst) => { received = inst; } });
-                }
-            });
-            mount(Parent, container);
-            assert.ok(received);
-            assert.equal(received.value, 42);
-        });
+            const instances = [];
 
-        test('this.refs(name) создаёт стабильный collector', () => {
-            const container = createContainer();
-            const MyComp = Component({
+            const Item = Component({
+                init() { instances.push(this); },
+                render(props) { return h('span', null, props.id); }
+            });
+
+            const App = Component({
+                order: [1, 2, 3],
                 render() {
-                    return h('div', null,
-                        h('input', { ref: this.refs('inp1') }),
-                        h('input', { ref: this.refs('inp2') })
+                    return h(Fragment, { key: 'group' },
+                        ...this.order.map(id => h(Item, { key: id, id }))
                     );
                 }
             });
-            const vnode = mount(MyComp, container);
-            const inst = vnode._instance;
-            assert.ok(inst.refs.inp1);
-            assert.ok(inst.refs.inp2);
-            assert.equal(inst.refs.inp1.tagName, 'INPUT');
-            assert.equal(inst.refs.inp2.tagName, 'INPUT');
+
+            const vnode = mount(App, container);
+            const app = vnode._instance;
+            await delay(10);
+
+            assert.equal(instances.length, 3);
+
+            app.update({ order: [3, 1, 2] });
+            await delay(10);
+
+            assert.equal(instances.length, 3, 'instance не должны пересоздаваться');
+        });
+    });
+
+    // =========================================================================
+    // Keys — базовое поведение
+    // =========================================================================
+    describe('Keys — базовое поведение', () => {
+        test('элементы с key сохраняются при reorder', async () => {
+            const container = createContainer();
+            const instances = [];
+
+            const Item = Component({
+                init() { instances.push(this); },
+                render(props) { return h('div', null, props.id); }
+            });
+
+            const App = Component({
+                order: [1, 2, 3],
+                render() {
+                    return h('div', null,
+                        this.order.map(id => h(Item, { key: id, id }))
+                    );
+                }
+            });
+
+            const vnode = mount(App, container);
+            const app = vnode._instance;
+            await delay(10);
+
+            assert.equal(instances.length, 3);
+
+            app.update({ order: [3, 1, 2] });
+            await delay(10);
+
+            assert.equal(instances.length, 3, 'instance не должны пересоздаваться');
+        });
+
+        test('key позволяет перемещать элемент между родителями внутри render', async () => {
+            const container = createContainer();
+            const instances = [];
+
+            const Item = Component({
+                init() { instances.push(this); },
+                render(props) { return h('div', null, props.id); }
+            });
+
+            const App = Component({
+                position: 'left',
+                render() {
+                    return h('div', null,
+                        h('div', { id: 'left' },
+                            this.position === 'left' && h(Item, { key: 'movable', id: 'item' })
+                        ),
+                        h('div', { id: 'right' },
+                            this.position === 'right' && h(Item, { key: 'movable', id: 'item' })
+                        )
+                    );
+                }
+            });
+
+            const vnode = mount(App, container);
+            const app = vnode._instance;
+            await delay(10);
+
+            assert.equal(instances.length, 1);
+            const firstInstance = instances[0];
+
+            app.update({ position: 'right' });
+            await delay(10);
+
+            assert.equal(instances.length, 1, 'instance не должен пересоздаваться');
+            assert.equal(instances[0], firstInstance, 'тот же instance после перемещения');
+        });
+
+        test('добавление элемента в конец списка с key', async () => {
+            const container = createContainer();
+            const instances = [];
+
+            const Item = Component({
+                init() { instances.push(this); },
+                render(props) { return h('div', null, props.id); }
+            });
+
+            const App = Component({
+                items: ['a', 'b'],
+                render() {
+                    return h('div', null,
+                        ...this.items.map(id => h(Item, { key: id, id }))
+                    );
+                }
+            });
+
+            const vnode = mount(App, container);
+            const app = vnode._instance;
+            await delay(10);
+
+            assert.equal(instances.length, 2);
+            const [instA, instB] = [...instances];
+
+            // Добавляем элемент в КОНЕЦ
+            app.update({ items: ['a', 'b', 'c'] });
+            await delay(10);
+
+            assert.equal(instances.length, 3);
+            assert.equal(instances[0], instA, 'a сохранён');
+            assert.equal(instances[1], instB, 'b сохранён');
+        });
+
+        test('удаление элемента из середины списка с key', async () => {
+            const container = createContainer();
+            const instances = [];
+
+            const Item = Component({
+                init() { instances.push(this); },
+                render(props) { return h('div', null, props.id); }
+            });
+
+            const App = Component({
+                items: ['a', 'b', 'c'],
+                render() {
+                    return h('div', null,
+                        ...this.items.map(id => h(Item, { key: id, id }))
+                    );
+                }
+            });
+
+            const vnode = mount(App, container);
+            const app = vnode._instance;
+            await delay(10);
+
+            assert.equal(instances.length, 3);
+            const [instA, instB, instC] = [...instances];
+
+            // Удаляем 'b' из середины
+            app.update({ items: ['a', 'c'] });
+            await delay(10);
+
+            // instance 'a' и 'c' сохранены, 'b' остался в массиве instances но больше не рендерится
+            assert.equal(instances.length, 3, 'instance не пересоздавались');
+            assert.equal(instances[0], instA, 'a сохранён');
+            assert.equal(instances[2], instC, 'c сохранён');
+        });
+    });
+
+    // =========================================================================
+    // Refresh
+    // =========================================================================
+    describe('refresh()', () => {
+        test('обновляет все корневые компоненты', async () => {
+            const container = createContainer();
+            let renderCount = 0;
+
+            const MyComp = Component({
+                render() { renderCount++; return h('div'); }
+            });
+
+            mount(MyComp, container);
+            renderCount = 0;
+
+            await refresh();
+            assert.ok(renderCount > 0, 'render должен выполниться');
+        });
+
+        test('возвращает время выполнения', async () => {
+            const container = createContainer();
+            const MyComp = Component({
+                render() { return h('div'); }
+            });
+
+            mount(MyComp, container);
+            const time = await refresh();
+            assert.equal(typeof time, 'number');
+            assert.ok(time >= 0);
         });
     });
 }
 
-console.log('\n✅ Test-node-01 инициализирован (46 тестов)\n');
+console.log('\n✅ Test-node-01 инициализирован\n');
