@@ -103,15 +103,12 @@ function createPortal(children, containerGetter) {
 // Component factory
 // ============================================================================
 
+const RESERVED = new Set(['init','render','props','memo','onMounted','onUpdated','onUnmounted','context']);
+
 function Component(definition) {
     function ComponentClass() {
-        const reserved = [
-            'init', 'render', 'props', 'memo',
-            'onMounted', 'onUpdated', 'onUnmounted', 'context'
-        ];
-
         for (const key in definition) {
-            if (reserved.includes(key)) continue;
+            if (RESERVED.has(key)) continue; // O(1)
 
             const val = definition[key];
             if (typeof val === 'function') {
