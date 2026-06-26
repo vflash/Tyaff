@@ -9,7 +9,7 @@
 Модуль экспортирует **именованные функции**:
 
 ```javascript
-export { h, Component, createPortal, Fragment, mount, refresh };
+export { h, Component, createPortal, Fragment, mount, refresh, setDevMode };
 ```
 
 **Импорт:**
@@ -315,11 +315,13 @@ const BadCard = Component({
 
 ### Изоляция ошибок
 
-Каждый компонент в очереди обновлений обрабатывается в **своём `try/catch`**:
+Каждый компонент в очереди обновлений обрабатывается в **своём `try/catch`** (в development mode):
 - Если компонент падает в `render()` — ошибка логируется, компонент не выполняется
 - Остальные компоненты в очереди продолжают обновляться
 - В ошибке указывается имя компонента (`definition.name` или "Component")
 - Ошибка **не** прерывает `flushBatch`
+
+**Важно:** В production mode (через `setDevMode(false)`) изоляция ошибок отключается для максимальной производительности.
 
 ### `this.update(patch?)` → `Promise<boolean>`
 
@@ -537,8 +539,9 @@ return h(Fragment, null,              // ,0
 );
 ```
 
-### Known limitation: render → null → render
+### Known limitations
 
+**render → null → render:**
 Когда `render()` возвращает `null`, последующий render с реальным vnode может не восстанавливать DOM корректно.
 
 **Рекомендуемый подход** — условный рендер внутри обёртки через `&&`:
@@ -551,6 +554,9 @@ render() {
     );
 }
 ```
+
+**Large lists (>10K элементов):**
+Для списков с большим количеством элементов рекомендуется использовать виртуализацию на уровне приложения (рендер только видимых элементов).
 
 **Batch-вставка детей:**
 - При вставке большого количества узлов использовать **batch-операции** (`prepend`) для минимизации reflow
@@ -749,6 +755,35 @@ await refresh();  // явный trigger
 **Когда НЕ использовать:**
 - Большие приложения с множеством компонентов
 - Когда нужна изоляция обновлений (лучше props/context)
+
+---
+
+## 15. PRODUCTION MODE
+
+### setDevMode(isDev: boolean)
+
+Переключает библиотеку между development и production режимами.
+
+**Development mode (по умолчанию):**
+- Проверка дубликатов ключей (`console.warn`)
+- Изоляция ошибок компонентов (try/catch)
+- Подробные сообщения об ошибках
+
+**Production mode:**
+- Отключение проверки дубликатов ключей
+- Отключение изоляции ошибок
+- Максимальная производительность
+
+**Использование:**
+```javascript
+import { setDevMode } from 'tyaff';
+
+if (process.env.NODE_ENV === 'production') {
+    setDevMode(false);
+}
+```
+
+**Важно:** В production mode ошибки в компонентах могут сломать весь batch обновлений.
 
 ---
 
