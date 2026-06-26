@@ -8,6 +8,17 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 const XLINK_NS = 'http://www.w3.org/1999/xlink';
 const HTML_NS = 'http://www.w3.org/1999/xhtml';
 
+// ⚡ Dev/Production флаг
+let IS_DEV = typeof process !== 'undefined' && process.env.NODE_ENV !== 'production';
+
+function setDevMode(isDev) {
+    IS_DEV = !!isDev;
+}
+
+// ============================================================================
+// Utility functions
+// ============================================================================
+
 function pushAll(target, source) {
     if (source == null) return;
     if (Array.isArray(source)) {
@@ -64,6 +75,10 @@ function collectDOMNodes(childs) {
     return result;
 }
 
+// ============================================================================
+// h() — создание VDOM узлов
+// ============================================================================
+
 function h(type, props, ...children) {
     const normalized = [];
     for (let i = 0; i < children.length; i++) {
@@ -84,6 +99,10 @@ function createPortal(children, containerGetter) {
     return { tag: Portal, props: { containerGetter }, childs: kids };
 }
 
+// ============================================================================
+// Component factory
+// ============================================================================
+
 function Component(definition) {
     function ComponentClass() {
         const reserved = [
@@ -92,7 +111,7 @@ function Component(definition) {
         ];
 
         for (const key in definition) {
-            if (reserved.includes(key)) continue;  // ← пропускаем всё зарезервированное
+            if (reserved.includes(key)) continue;
 
             const val = definition[key];
             if (typeof val === 'function') {
@@ -123,6 +142,10 @@ function Component(definition) {
     ComponentClass._definition = definition;
     return ComponentClass;
 }
+
+// ============================================================================
+// Batching
+// ============================================================================
 
 const batchQueue = new Set();
 let isBatchScheduled = false;
@@ -175,12 +198,17 @@ function flushBatch() {
         isBatchScheduled = false;
 
         for (const inst of toUpdate) {
-            try {
+            // ⚡ В production убираем try/catch для скорости
+            if (IS_DEV) {
+                try {
+                    inst._rerender();
+                } catch (err) {
+                    const name = inst._definition && inst._definition.name
+                        ? inst._definition.name : 'Component';
+                    console.error('❌ Error in component "' + name + '":\n', err);
+                }
+            } else {
                 inst._rerender();
-            } catch (err) {
-                const name = inst._definition && inst._definition.name
-                    ? inst._definition.name : 'Component';
-                console.error('❌ Error in component "' + name + '":\n', err);
             }
         }
 
@@ -194,6 +222,10 @@ function flushBatch() {
         isFlushing = false;
     }
 }
+
+// ============================================================================
+// Instance API
+// ============================================================================
 
 function attachInstanceAPI(inst) {
     const def = inst._definition;
@@ -269,7 +301,6 @@ function attachInstanceAPI(inst) {
                 d.onUpdated.call(this);
             }
 
-            // Резолвим все Promise'ы от update() с результатом render
             const resolvers = this._updateResolvers;
             this._updateResolvers = null;
             if (resolvers) {
@@ -299,7 +330,7 @@ function attachInstanceAPI(inst) {
                 for (let i = 0; i < newDeps.length; i++) {
                     if (newDeps[i] !== this._prevMemo[i]) { same = false; break; }
                 }
-                if (same) return Promise.resolve(false);  // Ничего не изменилось
+                if (same) return Promise.resolve(false);
             }
         }
 
@@ -365,6 +396,10 @@ function attachInstanceAPI(inst) {
     };
 }
 
+// ============================================================================
+// Keys
+// ============================================================================
+
 function makeMapKey(vnode, index, path) {
     if (vnode && vnode.props && vnode.props.key !== undefined) {
         const userKey = String(vnode.props.key).replace(/,/g, ',,');
@@ -378,6 +413,7 @@ function makeMapKey(vnode, index, path) {
  * Использует свой временный Map, не влияет на keyMap для reconcile.
  */
 function checkDuplicateKeys(vnode, path, seen) {
+    if (!IS_DEV) return;  // ⚡ Быстрый выход в production
     if (!seen) seen = new Map();
     if (vnode == null) return;
     if (Array.isArray(vnode)) {
@@ -466,6 +502,10 @@ function populateKeyMap(vnode, path, keyMap) {
         }
     }
 }
+
+// ============================================================================
+// Props
+// ============================================================================
 
 const RECREATE_ATTRS = ['type', 'is'];
 const CAMEL_TO_ATTR = {
@@ -619,6 +659,10 @@ function applyProps(dom, oldProps, newProps, namespace) {
     }
 }
 
+// ============================================================================
+// Refs
+// ============================================================================
+
 function callRefs(vnode, seen = new WeakSet()) {
     if (vnode == null) return;
     if (typeof vnode !== 'object') return;
@@ -650,6 +694,10 @@ function callRefs(vnode, seen = new WeakSet()) {
         for (let i = 0; i < vnode.childs.length; i++) callRefs(vnode.childs[i], seen);
     }
 }
+
+// ============================================================================
+// Lifecycle
+// ============================================================================
 
 function triggerMounted(roots) {
     const components = [];
@@ -735,7 +783,6 @@ function unmountVdom(vnode, seen = new WeakSet()) {
         const inst = vnode._instance;
         if (inst) {
             if (vnode.props && vnode.props.ref) vnode.props.ref(null);
-            // ⚠️ ЗАЩИТА: _definition может быть undefined (мусорный entry)
             const d = inst._definition;
             if (d && d.onUnmounted) d.onUnmounted.call(inst);
             if (inst._vdom) unmountVdom(inst._vdom, seen);
@@ -751,6 +798,10 @@ function unmountVdom(vnode, seen = new WeakSet()) {
         for (let i = 0; i < vnode.childs.length; i++) unmountVdom(vnode.childs[i], seen);
     }
 }
+
+// ============================================================================
+// DOM sync
+// ============================================================================
 
 function syncDOMChildren(parentDOM, oldNodes, newNodes) {
     let oi = 0;
@@ -774,6 +825,10 @@ function syncDOMChildren(parentDOM, oldNodes, newNodes) {
         if (o && o.parentNode === parentDOM) parentDOM.removeChild(o);
     }
 }
+
+// ============================================================================
+// Reconcile
+// ============================================================================
 
 function reconcile(oldNode, newNode, parentDOM, ctx, path, keyMap, namespace) {
     if (oldNode === newNode) {
@@ -899,6 +954,10 @@ function reconcileChildren(oldChilds, newChilds, parentDOM, ctx, path, keyMap, n
     return newNodes;
 }
 
+// ============================================================================
+// Mount HTML
+// ============================================================================
+
 function mountHTML(vnode, parentDOM, ctx, path, keyMap, namespace) {
     if (vnode.tag === 'svg') namespace = SVG_NS;
     const isForeignObject = vnode.tag === 'foreignObject';
@@ -996,6 +1055,10 @@ function reconcileHTML(oldVnode, newVnode, parentDOM, ctx, path, keyMap, namespa
     return dom;
 }
 
+// ============================================================================
+// Props helpers
+// ============================================================================
+
 function buildIncomingProps(rawProps, childs) {
     const out = {};
     for (const k in rawProps) {
@@ -1014,13 +1077,15 @@ function buildIncomingProps(rawProps, childs) {
     return out;
 }
 
+// ============================================================================
+// Mount/Reconcile Component
+// ============================================================================
+
 function mountComponent(vnode, parentDOM, ctx, path, keyMap, namespace) {
     const def = vnode.tag._definition;
     const mapKey = makeMapKey(vnode, 0, path);
     let found = keyMap ? keyMap.get(mapKey) : null;
 
-    // ⚠️ ФИЛЬТР: found может быть мусорным объектом без _definition
-    // (например, Fragment instance { _isKeyedFragment: true })
     let inst = null;
     if (found && found._definition === def) {
         inst = found;
@@ -1085,6 +1150,10 @@ function reconcileComponent(oldVnode, newVnode, parentDOM, ctx, path, keyMap, na
     return inst._nodes;
 }
 
+// ============================================================================
+// Mount/Reconcile Fragment
+// ============================================================================
+
 function mountFragment(vnode, parentDOM, ctx, path, keyMap, namespace) {
     const hasKey = vnode.props && vnode.props.key !== undefined;
 
@@ -1139,6 +1208,10 @@ function reconcileFragment(oldVnode, newVnode, parentDOM, ctx, path, keyMap, nam
 
     return nodes;
 }
+
+// ============================================================================
+// Mount/Reconcile Portal
+// ============================================================================
 
 function mountPortal(vnode, parentDOM, ctx, path, keyMap, namespace) {
     const inst = {
@@ -1220,6 +1293,10 @@ function reconcilePortal(oldVnode, newVnode, parentDOM, ctx, path, keyMap, names
     return [inst._anchor];
 }
 
+// ============================================================================
+// Mount Node (универсальная)
+// ============================================================================
+
 function mountNode(vnode, parentDOM, ctx, path, keyMap, namespace) {
     if (vnode == null) return null;
     if (vnode._text !== undefined) {
@@ -1251,6 +1328,10 @@ function mountNode(vnode, parentDOM, ctx, path, keyMap, namespace) {
     }
     return null;
 }
+
+// ============================================================================
+// Mount — точка входа
+// ============================================================================
 
 function normalizeMountInput(input) {
     if (input === null || input === undefined) return null;
@@ -1341,7 +1422,6 @@ function mount(input, container) {
     const flat = Array.isArray(nodes) ? nodes : (nodes ? [nodes] : []);
     prependAll(container, flat);
 
-    // ⚠️ Проверяем дубликаты ключей при первом mount
     checkDuplicateKeys(vnode, '');
 
     mountedTrees.set(container, vnode);
@@ -1350,6 +1430,10 @@ function mount(input, container) {
     triggerMounted(vnode);
     return vnode;
 }
+
+// ============================================================================
+// Refresh
+// ============================================================================
 
 function refresh() {
     const start = performance.now();
@@ -1387,8 +1471,12 @@ function _cleanupAll() {
     }
 }
 
-export { h, Component, createPortal, Fragment, mount, refresh, _cleanupAll };
+// ============================================================================
+// Экспорт
+// ============================================================================
+
+export { h, Component, createPortal, Fragment, mount, refresh, _cleanupAll, setDevMode };
 
 if (typeof window !== 'undefined') {
-    window.VDOM = { h, Component, createPortal, Fragment, mount, refresh, _cleanupAll };
+    window.VDOM = { h, Component, createPortal, Fragment, mount, refresh, _cleanupAll, setDevMode };
 }
