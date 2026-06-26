@@ -15,11 +15,11 @@ export { h, Component, createPortal, Fragment, mount, refresh };
 **Импорт:**
 ```javascript
 // Именованные экспорты (рекомендуется)
-import { h, Component, mount, refresh } from './core.js';
+import { h, Component, mount, refresh } from 'tyaff';
 
 // Или отдельные
-import { refresh } from './core.js';
-import { mount } from './core.js';
+import { refresh } from 'tyaff';
+import { mount } from 'tyaff';
 ```
 
 ---
@@ -29,7 +29,6 @@ import { mount } from './core.js';
 - Название `tyaff` используется **только в документации**
 - В коде ЗАПРЕЩЕНО использовать слово `tyaff` в именах
 - Используй общие названия: `VDOM`, `Component`, `h`, `reconcile`, `mount`
-- Публичный API — объект с методами, а не класс
 
 ---
 
@@ -37,14 +36,34 @@ import { mount } from './core.js';
 
 Функция `h(type, props, ...children)` возвращает плоский объект: `{ tag, props, childs }`.
 
-**Нормализация детей:**
+### Специальные идентификаторы типов
+
+Библиотека экспортирует два Symbol-идентификатора:
+
+- `Fragment` — Symbol для создания фрагментов (группировка без DOM-обёртки)
+- `createPortal()` — функция, возвращающая vnode с `tag: Symbol(Portal)` для порталов
+
+**Пример:**
+```javascript
+import { h, Fragment, createPortal } from 'tyaff';
+
+// Fragment
+h(Fragment, null, h('li'), h('li'));
+
+// Portal
+createPortal(h('div', null, 'Modal'), () => document.getElementById('modal-root'));
+```
+
+### Нормализация детей
+
 - Массивы в `children` **остаются массивами** (не оборачиваются в Fragment)
-- Для элементов внутри массивов ключи формируются как если бы был Fragment
-- `null`, `undefined`, `false` → `null` в VDOM (плейсхолдеры)
+- Для элементов внутри массивов идентификаторы формируются как если бы был Fragment
+- `null`, `undefined`, `false` → не создают DOM-узел и не участвуют в диффе
 - **Текстовые узлы обязательно оборачиваются в объекты** (`{ _text: String(value) }`)
 - ЗАПРЕЩЕНО использовать `.flat(Infinity)` на массивах детей
 
-**Fragment с key:**
+### Fragment с key
+
 - Fragment без key — лёгкая обёртка, прозрачная для reconciliation
 - Fragment с key (`h(Fragment, { key: 'group' }, ...)`) — создаёт виртуальный instance для поддержки перемещения группы детей
 - Дети Fragment с key сохраняют свои instance и state при перемещении группы
@@ -62,34 +81,74 @@ import { mount } from './core.js';
 
 **State:** отсутствует. Все переменные — прямые мутабельные свойства на instance (`this._count`).
 
-**Props:**
+### Доступ к `this`
+
+Все ключевые методы имеют доступ к instance (`this`):
+
+| Метод | Доступ к `this` |
+|-------|----------------|
+| `props(incoming)` | ✅ |
+| `init(props)` | ✅ |
+| `memo(props)` | ✅ |
+| `render(props)` | ✅ |
+
+### Props
+
 - Функция `props(incoming)` **опциональна**, по умолчанию `p => p`
 - Если определена — результат в `this.props`
 - Если не определена — `this.props = incoming`
 - Должна быть **чистой функцией** (может вызываться несколько раз)
 
-**Children (React-подход):**
-- Движок автоматически добавляет `children` в объект `incoming` перед вызовом `props()`
-- `children` может быть vnode, массивом, `null`, строкой или числом
-- В `props()` разработчик деструктурирует: `{ title, children } = incoming`
+### Children (React-подход)
 
-**Пример: что приходит в `props()`:**
+Движок автоматически добавляет `children` в объект `incoming` перед вызовом `props()`:
+
+**Цепочка обработки:**
+1. Входящие props + children → `incoming`
+2. `incoming` → `props(incoming)` → `this.props`
+3. Если `props()` не указан → `this.props = incoming`
+
+**Тип `children`:**
+- vnode (одиночный элемент)
+- массив vnode
+- строка или число (текст)
+- `null`
+
+**Пример:**
 ```javascript
-props(incoming) {
-    // incoming = { title: 'Hello', children: [...], ... }
-    const { title, children, ...rest } = incoming;
-    return { title: title.toUpperCase(), children, ...rest };
-}
+// Использование компонента
+h(Card, { title: 'Hello' },
+    h('p', null, 'Content')
+);
+
+// Внутри компонента
+Component({
+    props(incoming) {
+        // incoming = { title: 'Hello', children: h('p', ...) }
+        const { title, children } = incoming;
+        return { title: title.toUpperCase(), children };
+    },
+
+    render() {
+        return h('div', null,
+            h('h1', null, this.props.title),
+            this.props.children  // children доступен через this.props
+        );
+    }
+});
 ```
 
-**Зарезервированные имена** (нельзя переопределять пользователю):
+### Зарезервированные имена
+
+Следующие имена нельзя переопределять пользователю:
 ```
 init, render, props, memo,
 onMounted, onUpdated, onUnmounted, context,
 update, refs, contextSelf, _rerender, _scheduleUpdate
 ```
 
-**Архитектурные ограничения:**
+### Архитектурные ограничения
+
 - **НЕТ двусторонних ссылок**: компонент хранит только `_vdom` (вниз), **не** обратную ссылку на vnode. Портал хранит `_rendered`, не vnode.
 - **Блокировка rerender в `init()`**: если `init()` вызывает `update()`, rerender блокируется. Первый render — строго после `init()`.
 - **`init()` выполняется только при первом создании instance**. При reconcile (повторном рендере компонента в том же месте с тем же `tag`) `init()` **не выполняется** — работает только `_rerender()`.
@@ -97,20 +156,20 @@ update, refs, contextSelf, _rerender, _scheduleUpdate
 ### Порядок инициализации
 
 **При первом mount:**
-1. Собираются incoming props (включая `children` из `childs`)
-2. Выполняется `props(incoming)` → результат в `this.props`
-3. Выполняется `init(props)` → может использовать `this.props`, устанавливает state
-4. Первый `_rerender()` → `memo(props)` → `render(props)`
+1. Создаётся instance компонента
+2. Выполняется `props(incoming)` → результат в `this.props` (имеет доступ к `this`)
+3. Выполняется `init(this.props)` → может использовать `this.props`, устанавливает state
+4. Первый `_rerender()` → `memo(this.props)` → `render(this.props)`
 5. Вставка DOM в parent
 6. `onMounted()` после вставки
 
 **При update (от родителя или локально):**
-1. `props(incoming)` → обновляет `this.props`
-2. `memo(props)` → проверка зависимостей
+1. `props(incoming)` → обновляет `this.props` (имеет доступ к `this`)
+2. `memo(this.props)` → проверка зависимостей
 3. Если совпадают → render не выполняется, дети всё равно проходят цепочку
-4. Если отличаются → `render(props)` → `onUpdated()`
+4. Если отличаются → `render(this.props)` → `onUpdated()`
 
-**Важно:** `props()` должна быть **чистой функцией** от `incoming`. Она выполняется до `init()` при первом mount, поэтому не должна полагаться на instance state (`this._xxx`).
+**Важно:** `props()` должна быть **чистой функцией** от `incoming`. Она вызывается до `init()` при первом mount, поэтому не должна полагаться на instance state (`this._xxx`).
 
 ### Сигнатуры функций — props первым аргументом
 
@@ -118,24 +177,24 @@ update, refs, contextSelf, _rerender, _scheduleUpdate
 
 ```javascript
 Component({
-    // При первом mount — для инициализации state
+    // 1. Обработка входящих props (при mount и каждом update)
+    props(incoming) {
+        return { ...incoming, normalized: true };
+    },
+
+    // 2. Инициализация (только при первом mount, после props())
     init(props) {
         this._count = props.initialCount || 0;
     },
 
-    // При каждом update — массив зависимостей
+    // 3. Проверка зависимостей (при каждом update после props())
     memo(props) {
         return [props.value, this._count];
     },
 
-    // Рендер — можно использовать деструктуризацию
+    // 4. Создание VDOM (после memo() если зависимости изменились)
     render({ title, items }) {
         return h('div', null, title, items.length);
-    },
-
-    // Обработка входящих props (опционально)
-    props(incoming) {
-        return { ...incoming, normalized: true };
     }
 });
 ```
@@ -169,7 +228,6 @@ const App = Component({
 const Page = Component({
     props(incoming) { this.props = incoming; },
     context: {
-        // Умный геттер: props → fallback к родителю
         lang() { return this.props.lang || this.context('lang'); }
     },
     render() { return h('div', { class: 'wrapper' }, h(Button)); }
@@ -178,7 +236,6 @@ const Page = Component({
 // 3. Глубокий ребёнок запрашивает контекст у ближайшего провайдера
 const Button = Component({
     render() {
-        // context() идёт к родителю: Page (lang='ru') → App (lang='en')
         const lang = this.context('lang');  // → 'ru'
         return h('button', null, lang === 'ru' ? 'Нажми' : 'Click');
     }
@@ -234,7 +291,7 @@ const BadCard = Component({
 ## 4. LIFECYCLE
 
 - `init()` — один раз до первого рендера
-- `onMounted()` — строго один раз **после** физической вставки в DOM. Вызывается **children-first** (дети монтируются раньше родителей). Для порталов — только когда `containerGetter` впервые вернул валидный узел
+- `onMounted()` — строго один раз **после** физической вставки в DOM. Выполняется **children-first** (дети монтируются раньше родителей). Для порталов — только когда `containerGetter` впервые вернул валидный узел
 - `onUpdated()` — выполняется **только при update**, НЕ при первом mount. Только после реального выполнения `render()` и применения к DOM. Если `memo()` заблокировал render — `onUpdated()` не выполняется
 - `onUnmounted()` — выполняется **до** удаления DOM (DOM ещё доступен для cleanup)
 
@@ -249,7 +306,7 @@ const BadCard = Component({
 - **Защиту от вызова `update()` внутри `render()`** — выводить `console.error` с рекомендацией использовать прямое присваивание (`this.value = 22`)
 - **Batching через microtask** (`Promise.resolve().then`) — множественные `update()` объединяются в один render
 
-### Лимит вложенных обновлений (как в React)
+### Лимит вложенных обновлений
 
 - Лимит 50 итераций внутри одной задачи
 - Счётчик сбрасывается **только** для новой задачи (когда очередь была пуста)
@@ -266,25 +323,25 @@ const BadCard = Component({
 
 ### `this.update(patch?)` → `Promise<boolean>`
 
-**Возвращает `Promise<boolean>`:**
-- `true` — `render()` выполнился
-- `false` — `render()` не выполнен (отменён или заблокирован)
+**Единый принцип:** После `await update()` визуал **гарантированно актуален**.
 
-**Когда возвращает `false`:**
-| Ситуация | Причина |
-|----------|---------|
-| `patch` не изменил значений | Shallow comparison показал идентичность |
-| `memo()` заблокировал render | Зависимости не изменились |
-| `update()` внутри `render()` | Запрещено, выводится `console.error` |
-| `update()` во время `init()` | Init ещё не завершён, render отложен |
-| Принудительный `update({})` с `memo()` | memo может заблокировать даже пустой update |
+**Возвращает результат применения патча** (изменились ли данные):
 
-**Без аргументов** → принудительное обновление.
-**С пустым объектом `{}`** → эквивалентно `update()` (принудительное).
-**С объектом** → shallow comparison, `Object.assign(this, patch)` если есть отличия, иначе отмена.
-**Если внутри `init()`** → применяется patch, но rerender блокируется.
+| Вызов | Возвращает | Поведение |
+|-------|-----------|-----------|
+| `update()` без аргументов | `true` | Принудительный render, данные считаются изменёнными |
+| `update({})` пустой объект | `false` | Патч пустой, ничего не изменилось |
+| `update(patch)` с изменениями | `true` | Shallow comparison нашёл отличия |
+| `update(patch)` без изменений | `false` | Все значения идентичны |
 
-**Batching:** Несколько `update()` в одном тике объединяются — все получают **один результат** (`true` или `false`).
+**Promise разрешается сразу**, не дожидаясь общего батча.
+
+**Batching:**
+Несколько `update()` в одном тике объединяются в один render. Каждый Promise получает результат согласно правилам выше (не общий результат батча).
+
+**Исключения (Promise разрешается сразу):**
+- `update()` внутри `render()` → `false` + `console.error`
+- `update()` во время `init()` → patch применяется, но render отложен → `false`
 
 ### memo() — защита render() текущего компонента
 
@@ -365,76 +422,120 @@ this.refs.portal._container;     // instance портала
 - Разные `tag` → уничтожение старого, создание нового
 - Одинаковые HTML-теги → обновление атрибутов (плоское сравнение props)
 - Одинаковые компоненты (проверяется через `tag._definition`) → сохранение instance, обновление `_parentContext`, пропсов, запуск `props() → memo()`
-- `null` в VDOM → игнорируется при диффе
+- `null` в VDOM → не создаёт DOM-узел и не участвует в диффе
 
-### Keys (отличие от React)
+### Идентификация элементов
 
-В React ключ уникален только **среди братьев** (одного родителя).
-В tyaff пользовательский ключ (с префиксом `#`) уникален **среди ВСЕХ элементов** в одном render компонента.
+**Алгоритм 1: Формирование идентификатора**
 
-Это позволяет перемещать элементы между **разными родителями** с сохранением instance и state.
+Для каждого элемента в дереве формируется идентификатор:
 
-**Контракт:** Разработчик гарантирует, что пользовательский `key` уникален среди всех элементов
-в текущем render. При нарушении — поведение непредсказуемо
-(последний элемент с дубликатом перезапишет предыдущий в Map).
+1. Если элемент имеет `key` prop:
+   - Идентификатор = `#` + key
+   - Запятая в key экранируется: `,` → `,,`
+   - Символ `#` не экранируется
 
-**Два типа ключей:**
-- **Пользовательские** (`#fio`, `#group-a`) — уникальны в рамках всего render, поддерживают перемещение между родителями
-- **Автоматические** (`,0,1,2`) — локальные по позиции, не поддерживают перемещение
+2. Если элемент без `key` prop:
+   - Идентификатор = `parent_id` + `,` + `index`
+   - где `index` — позиция элемента в массиве детей родителя
 
-**Поддержка перемещения:** Компоненты и keyed Fragment с пользовательскими ключами
-могут перемещаться между разными родителями и позициями — instance сохраняется.
+**Корневой уровень:**
+- Одиночный vnode: получает идентификатор `,0`
+- Массив vnode: каждый элемент получает `,index` (`,0`, `,1`, ...)
+- Fragment: получает `,0`, его дети получают `,0,index`
 
-- Движок держит Map для текущего render: `key → instance`
-- При перемещении компонента между разными родителями **внутри одного render** instance сохраняется и физически переносится
-- При следующем render Map пересоздаётся
+**Алгоритм 2: Сохранение элемента при обновлении**
 
-**Система ключей:**
-- Автоматические: `,0,1,2` (путь от корня через запятые, включая индексы массивов)
-- Пользовательские: `#fio,5` (префикс `#`, ключ, запятая, индекс ребёнка)
-- Запятая в пользовательских ключах экранируется: `,` → `,,`
-- Символ `#` не экранируется
-- Map хранит полные ключи с индексами: `keyMap.set('#fio,5', instanceY)`
+Элемент сохраняется (instance/DOM не пересоздаётся) если:
+- Тип элемента (`tag`) совпадает со старым
+- Идентификатор элемента совпадает со старым
 
-**Fragment с key:**
+В противном случае старый элемент уничтожается, создаётся новый.
 
-Fragment поддерживает `key` prop, что позволяет **перемещать группы детей** без потери их instance и state:
+**Следствия:**
+- Элемент с user key может перемещаться между родителями — идентификатор `#key` не зависит от родителя
+- Дети элемента с user key наследуют его префикс — сохраняются при перемещении родителя
+- Path-based идентификаторы зависят от позиции — элементы пересоздаются при изменении порядка
 
+### Корневой элемент компонента
+
+`render()` компонента может вернуть:
+
+**Одиночный vnode:**
 ```javascript
-// Группы можно перемещать — дети сохранят свои instance
-h(Fragment, { key: 'group-a' },
-    h(Item, { key: 'i1' }),
-    h(Item, { key: 'i2' })
-)
+return h('div', ...);
 ```
+- Vnode получает идентификатор `,0`
 
-**Когда использовать:**
-- Переключаемые вкладки/табы с общими детьми
-- Drag-and-drop групп элементов
-- Любые сценарии где группа элементов меняет позицию в родителе
-
-**Без key:** Fragment — лёгкая обёртка без overhead.
-**С key:** Fragment создаёт виртуальный instance для поддержки перемещения.
-
-**Система ключей для Fragment:**
-- Fragment с key получает пользовательский ключ: `#group-a`
-- Дети Fragment с key получают ключи относительно Fragment: `#group-a,0`, `#group-a,1`
-- При перемещении Fragment весь его виртуальный instance переносится, дети сохраняют свои instance
-
-**Пример дерева ключей:**
+**Массив vnode:**
 ```javascript
-h('B', null,
-    h(X, { key: 'fio' },           // ключ: #fio, в Map: #fio → instanceX
-        h('E'),                    // ключ: #fio,0
-        h('Y')                     // ключ: #fio,1, в Map: #fio,1 → instanceY
+return [h('a'), h('b')];
+```
+- Каждый элемент массива — отдельный корневой vnode
+- Первый получает `,0`, второй `,1`, и так далее
+
+**Fragment:**
+```javascript
+return h(Fragment, null, h('a'), h('b'));
+```
+- Fragment — это один vnode, получает идентификатор `,0`
+- Дети Fragment получают `,0,0`, `,0,1`, и так далее
+
+### Примеры деревьев ключей
+
+**Пример 1 — одиночный корень `B`:**
+```javascript
+return h('B', null,                   // ,0
+    h(X, { key: 'fio' },              // #fio
+        h('E'),                       // #fio,0
+        h('Y')                        // #fio,1
     ),
-    h(Fragment, { key: 'items' },  // ключ: #items (виртуальный instance)
-        h(X, { key: 'fio2' }),     // ключ: #items,#fio2
-        h('E')                     // ключ: #items,1
-    )
-)
+    h('div', null,                    // ,0,1
+        h('span'),                    // ,0,1,0
+        h(Fragment, { key: 'items' }, // #items
+            h(X, { key: 'fio2' }),    // #fio2
+            h('E')                    // #items,1
+        )
+    ),
+    [
+        h('span'),                    // ,0,2,0
+        h(Fragment, null,             // ,0,2,1
+            h('Z')                    // ,0,2,1,0
+        )
+    ]
+);
 ```
-При переносе X или Fragment в другое место ключи не меняются, инстансы сохраняются.
+
+**Пример 2 — массив как корень:**
+```javascript
+return [
+    h(X, { key: 'fio' },              // #fio
+        h('E'),                       // #fio,0
+        h('Y')                        // #fio,1
+    ),
+    h('div', null,                    // ,1
+        h('span'),                    // ,1,0
+        h(Fragment, { key: 'items' }, // #items
+            h(X, { key: 'fio2' }),    // #fio2
+            h('E')                    // #items,1
+        )
+    ),
+    [
+        h('span'),                    // ,2,0
+        h(Fragment, null,             // ,2,1
+            h('Z')                    // ,2,1,0
+        )
+    ]
+];
+```
+
+**Пример 3 — Fragment как корень:**
+```javascript
+return h(Fragment, null,              // ,0
+    h(X, { key: 'fio2' }),            // #fio2
+    h('E')                            // ,0,1
+);
+```
 
 ### Known limitation: render → null → render
 
@@ -536,7 +637,7 @@ SVG требует специальный namespace при создании эл
 
 **Примеры:**
 ```javascript
-import { h, Component, mount } from './core.js';
+import { h, Component, mount } from 'tyaff';
 
 mount(App, container);                              // конструктор
 mount(h(App, { theme: 'dark' }), container);       // vnode
@@ -562,7 +663,7 @@ mount(null, container);                             // unmount
 
 **Импорт:**
 ```javascript
-import { refresh } from './core.js';
+import { refresh } from 'tyaff';
 ```
 
 **Сигнатура:**
@@ -586,7 +687,7 @@ await refresh();  // ✅ MyComponent обновится
 **Примеры:**
 
 ```javascript
-import { refresh } from './core.js';
+import { refresh } from 'tyaff';
 
 // Измерение производительности
 store.items = processData(bigData);
@@ -627,7 +728,7 @@ await refresh();  // все компоненты перечитают store
 export const store = { count: 0 };
 
 // App.js
-import { h, Component, refresh } from './core.js';
+import { h, Component, refresh } from 'tyaff';
 
 const Counter = Component({
     render() {
