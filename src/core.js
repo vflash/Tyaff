@@ -389,10 +389,11 @@ function attachInstanceAPI(inst) {
 // Keys
 // ============================================================================
 
-function makeMapKey(vnode, index, path) {
-    if (vnode && vnode.props && vnode.props.key !== undefined) {
-        const userKey = String(vnode.props.key).replace(/,/g, ',,');
-        return '#' + userKey;
+function makeMapKey(vnode, path) {
+    const key = vnode?.props?.key;
+    if (key !== undefined) {
+        const userKey = String(key);
+        return '#' + (userKey.indexOf(',') !== -1 ? userKey.replace(/,/g, ',,') : userKey);
     }
     return path;
 }
@@ -467,7 +468,7 @@ function populateKeyMap(vnode, path, keyMap) {
         const hasKey = vnode.props && vnode.props.key !== undefined;
 
         if (hasKey && vnode._instance) {
-            const key = makeMapKey(vnode, 0, path);
+            const key = makeMapKey(vnode, path);
             keyMap.set(key, vnode._instance);
         }
 
@@ -481,7 +482,7 @@ function populateKeyMap(vnode, path, keyMap) {
     }
 
     if (vnode._instance) {
-        const key = makeMapKey(vnode, 0, path);
+        const key = makeMapKey(vnode, path);
         keyMap.set(key, vnode._instance);
     }
 
@@ -1072,7 +1073,7 @@ function buildIncomingProps(rawProps, childs) {
 
 function mountComponent(vnode, parentDOM, ctx, path, keyMap, namespace) {
     const def = vnode.tag._definition;
-    const mapKey = makeMapKey(vnode, 0, path);
+    const mapKey = makeMapKey(vnode, path);
     let found = keyMap ? keyMap.get(mapKey) : null;
 
     let inst = null;
@@ -1147,7 +1148,7 @@ function mountFragment(vnode, parentDOM, ctx, path, keyMap, namespace) {
     const hasKey = vnode.props && vnode.props.key !== undefined;
 
     if (hasKey && keyMap) {
-        const mapKey = makeMapKey(vnode, 0, path);
+        const mapKey = makeMapKey(vnode, path);
         const oldVnode = keyMap.get(mapKey);
 
         if (oldVnode && oldVnode.tag === Fragment) {
