@@ -19,6 +19,11 @@ function setDevMode(isDev) {
 // Utility functions
 // ============================================================================
 
+function escapeKey(key) {
+    const str = String(key);
+    return str.indexOf(',') !== -1 ? str.replace(/,/g, ',,') : str;
+}
+
 function pushAll(target, source) {
     if (source == null) return;
     if (Array.isArray(source)) {
@@ -393,7 +398,7 @@ function makeMapKey(vnode, path) {
     const key = vnode?.props?.key;
     if (key !== undefined) {
         const userKey = String(key);
-        return '#' + (userKey.indexOf(',') !== -1 ? userKey.replace(/,/g, ',,') : userKey);
+        return '#' + escapeKey(userKey);
     }
     return path;
 }
@@ -417,7 +422,7 @@ function checkDuplicateKeys(vnode, path, seen) {
     if (vnode.tag === Fragment) {
         const hasKey = vnode.props && vnode.props.key !== undefined;
         if (hasKey) {
-            const key = '#' + String(vnode.props.key).replace(/,/g, ',,');
+            const key = '#' + escapeKey(vnode.props.key);
             if (seen.has(key)) {
                 console.warn(`⚠️ Warning: Duplicate key "${vnode.props.key}" detected in Fragment. Keys must be unique within a single render call.`);
             } else {
@@ -435,7 +440,7 @@ function checkDuplicateKeys(vnode, path, seen) {
 
     const hasKey = vnode.props && vnode.props.key !== undefined;
     if (hasKey) {
-        const key = '#' + String(vnode.props.key).replace(/,/g, ',,');
+        const key = '#' + escapeKey(vnode.props.key);
         if (seen.has(key)) {
             console.warn(`⚠️ Warning: Duplicate key "${vnode.props.key}" detected. Keys must be unique within a single render call.`);
         } else {
@@ -617,13 +622,14 @@ function applyProps(dom, oldProps, newProps, namespace) {
     }
 
     const isSVG = namespace === SVG_NS;
+    const tag = dom.tagName;  // ⚡ Кэшируем один раз
     const isFormElement = !isSVG && (
-        dom.tagName === 'INPUT' ||
-        dom.tagName === 'TEXTAREA' ||
-        dom.tagName === 'SELECT'
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT'
     );
 
-    if (isFormElement && dom.tagName === 'SELECT' && 'multiple' in newProps) {
+    if (isFormElement && tag === 'SELECT' && 'multiple' in newProps) {
         if (oldProps.multiple !== newProps.multiple) {
             dom.multiple = !!newProps.multiple;
             if (newProps.multiple) dom.setAttribute('multiple', '');
@@ -633,7 +639,7 @@ function applyProps(dom, oldProps, newProps, namespace) {
 
     for (const k in newProps) {
         if (isFormElement && (k === 'value' || k === 'checked')) continue;
-        if (k === 'multiple' && dom.tagName === 'SELECT') continue;
+        if (k === 'multiple' && tag === 'SELECT') continue;
         if (oldProps[k] !== newProps[k]) {
             applyProp(dom, k, newProps[k], namespace);
         }
@@ -739,10 +745,15 @@ function triggerMounted(roots) {
     }
 }
 
-function unmountVdom(vnode, seen = new WeakSet()) {
+function unmountVdom(vnode, seen) {
     if (vnode == null || typeof vnode !== 'object') return;
-    if (seen.has(vnode)) return;
-    seen.add(vnode);
+
+    // ⚡ В production пропускаем WeakSet — циклических ссылок нет по архитектуре
+    if (IS_DEV) {
+        if (!seen) seen = new WeakSet();
+        if (seen.has(vnode)) return;
+        seen.add(vnode);
+    }
 
     if (Array.isArray(vnode)) {
         for (let i = 0; i < vnode.length; i++) unmountVdom(vnode[i], seen);
