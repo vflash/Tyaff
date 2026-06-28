@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>VDOM Benchmark — tyaff vs React vs Preact</title>
+<title>VDOM Benchmark — tyaff vs React</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace; background: #0d1117; color: #c9d1d9; padding: 24px; max-width: 1100px; margin: 0 auto; }
@@ -33,13 +33,11 @@ td:first-child { color: #e6edf3; font-weight: bold; white-space: nowrap; }
 .badge { display: inline-block; padding: 0 5px; border-radius: 4px; font-size: 9px; font-weight: bold; margin-left: 6px; vertical-align: middle; }
 .badge-tyaff { background: #58a6ff22; color: #58a6ff; border: 1px solid #58a6ff44; }
 .badge-react { background: #a371f722; color: #a371f7; border: 1px solid #a371f744; }
-.badge-preact { background: #f8514922; color: #f85149; border: 1px solid #f8514944; }
 .badge-vanilla { background: #3fb95022; color: #3fb950; border: 1px solid #3fb95044; }
 .bar { height: 3px; background: #21262d; border-radius: 2px; margin-top: 4px; min-width: 60px; }
 .bar-fill { height: 100%; border-radius: 2px; }
 .bar-tyaff { background: #58a6ff; }
 .bar-react { background: #a371f7; }
-.bar-preact { background: #f85149; }
 .bar-vanilla { background: #3fb950; }
 .check { color: #3fb950; font-size: 10px; margin-left: 4px; }
 .check-fail { color: #f85149; }
@@ -48,17 +46,15 @@ td:first-child { color: #e6edf3; font-weight: bold; white-space: nowrap; }
 .memo-section { margin-top: 32px; padding: 20px; background: #161b22; border-radius: 10px; border: 1px solid #30363d; }
 .memo-section h2 { color: #58a6ff; font-size: 16px; margin-bottom: 16px; }
 .memo-section .subtitle { color: #8b949e; font-size: 12px; margin-bottom: 20px; line-height: 1.5; }
-.memo-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+.memo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .memo-card { background: #0d1117; border-radius: 8px; border: 1px solid #21262d; padding: 14px; }
 .memo-card h3 { font-size: 13px; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid #21262d; }
 .memo-card.memo-tyaff h3 { color: #58a6ff; }
 .memo-card.memo-react h3 { color: #a371f7; }
-.memo-card.memo-preact h3 { color: #f85149; }
 .memo-card pre { font-size: 11px; line-height: 1.5; color: #c9d1d9; white-space: pre; overflow-x: auto; margin: 0; }
 .memo-card .verdict { margin-top: 10px; font-size: 11px; padding: 6px 8px; border-radius: 6px; }
 .memo-card.memo-tyaff .verdict { background: #3fb95015; color: #3fb950; border: 1px solid #3fb95033; }
 .memo-card.memo-react .verdict { background: #f8514915; color: #f85149; border: 1px solid #f8514933; }
-.memo-card.memo-preact .verdict { background: #f8514915; color: #f85149; border: 1px solid #f8514933; }
 .memo-summary { margin-top: 16px; padding: 12px 16px; background: #3fb95010; border: 1px solid #3fb95033; border-radius: 8px; color: #3fb950; font-size: 12px; line-height: 1.6; }
 .memo-summary strong { color: #58a6ff; }
 @media (max-width: 768px) {
@@ -71,8 +67,8 @@ td:first-child { color: #e6edf3; font-weight: bold; white-space: nowrap; }
 
 <h1>VDOM Benchmark</h1>
 <p class="sub">
-    tyaff vs React vs Preact vs Vanilla JS<br>
-    Все update-сценарии используют measureUpdateOnly (mount не замеряется). React использует flushSync, tyaff и Preact — микротаски.
+    tyaff vs React vs Vanilla JS<br>
+    Все update-сценарии используют measureUpdateOnly (mount не замеряется). React использует flushSync, tyaff — микротаски.
 </p>
 
 <div class="controls">
@@ -86,12 +82,12 @@ td:first-child { color: #e6edf3; font-weight: bold; white-space: nowrap; }
 
 <table>
 <thead>
-<tr><th>Сценарий</th><th>tyaff</th><th>React</th><th>Preact</th><th>Vanilla</th><th>Лучший</th></tr>
+<tr><th>Сценарий</th><th>tyaff</th><th>React</th><th>Vanilla</th><th>Лучший</th></tr>
 </thead>
 <tbody id="results"></tbody>
 </table>
 
-<p class="note">Update-сценарии (2-10, 11-13): mount в setup, замеряется только update. Mount-сценарии (1, 5, 6): mount + cleanup в замере.</p>
+<p class="note">Update-сценарии (2-10, 11-14): mount в setup, замеряется только update. Mount-сценарии (1, 5, 6): mount + cleanup в замере.</p>
 
 <!-- Memo API comparison -->
 <div class="memo-section">
@@ -114,21 +110,10 @@ td:first-child { color: #e6edf3; font-weight: bold; white-space: nowrap; }
       <h3>React</h3>
       <pre>const Item = <b style="color:#f85149">React.memo</b>(
   function Item({ value }) {
-    return h('div', null, value);
+    return rh('div', null, value);
   }
 );</pre>
       <div class="verdict">HOC-обёртка + shallowEqual по умолчанию</div>
-    </div>
-    <div class="memo-card memo-preact">
-      <h3>Preact</h3>
-      <pre>const Item = <b style="color:#f85149">memo</b>(
-  function Item({ value }) {
-    return h('div', null, value);
-  },
-  <b style="color:#f85149">(prev, next) =&gt;
-    prev.value === next.value</b>
-);</pre>
-      <div class="verdict">HOC-обёртка + ручная функция сравнения</div>
     </div>
   </div>
 </div>
@@ -138,27 +123,10 @@ td:first-child { color: #e6edf3; font-weight: bold; white-space: nowrap; }
 <script type="module">
 
 import { h, Component, mount, Fragment } from '../src/core.js';
-import { h as ph, render as prender, Component as PComponent } from 'https://esm.sh/preact@10.25.4';
-import { useState } from 'https://esm.sh/preact@10.25.4/hooks';
 import React, { useState as RuseState, memo as Rmemo } from 'https://esm.sh/react@18.3.1';
 import { render as Rrender, flushSync as RflushSync, unmountComponentAtNode } from 'https://esm.sh/react-dom@18.3.1';
 
 const rh = React.createElement;
-
-// Локальная реализация memo для Preact (без зависимости от esm.sh/compat)
-function shallowDiff(a, b) {
-    for (const k in b) if (a[k] !== b[k]) return true;
-    for (const k in a) if (!(k in b)) return true;
-    return false;
-}
-const Pmemo = (fn, comparator) => {
-    return class Memo extends PComponent {
-        shouldComponentUpdate(np) {
-            return comparator ? !comparator(this.props, np) : shallowDiff(this.props, np);
-        }
-        render(props) { return fn(props); }
-    };
-};
 
 // ============================================================================
 // DOM REFS & CONFIG
@@ -190,7 +158,6 @@ function median(arr) {
     return s[Math.floor(s.length / 2)];
 }
 
-// measureAsync: mount + update + cleanup — всё в замере (для mount-only сценариев)
 async function measureAsync(setup, run, cleanup) {
     const { warmup, runs } = getConfig();
     for (let i = 0; i < warmup; i++) {
@@ -216,7 +183,6 @@ async function measureAsync(setup, run, cleanup) {
     return median(times);
 }
 
-// measureUpdateOnly: mount в setup (не замеряется), только update замеряется
 async function measureUpdateOnly(setupAsync, runAsync, cleanupAsync) {
     const { warmup, runs } = getConfig();
     for (let i = 0; i < warmup; i++) {
@@ -231,7 +197,7 @@ async function measureUpdateOnly(setupAsync, runAsync, cleanupAsync) {
         const ctx = await setupAsync();
         const t0 = performance.now();
         await runAsync(ctx);
-        await Promise.resolve(); //await flush();
+        await Promise.resolve();
         const t1 = performance.now();
         times.push(t1 - t0);
         await cleanupAsync(ctx);
@@ -247,12 +213,11 @@ function setStatus(text, phase = '') {
     statusEl.innerHTML = phaseHtml + text;
 }
 
-function addRow(name, tyaffMs, reactMs, preactMs, vanillaMs, tyaffOk, reactOk, preactOk) {
+function addRow(name, tyaffMs, reactMs, vanillaMs, tyaffOk, reactOk) {
     const tr = document.createElement('tr');
     const libs = [
         { ms: tyaffMs, ok: tyaffOk, name: 'tyaff', cls: 'tyaff' },
         { ms: reactMs, ok: reactOk, name: 'React', cls: 'react' },
-        { ms: preactMs, ok: preactOk, name: 'Preact', cls: 'preact' },
     ].filter(l => l.ms != null);
 
     const allMs = libs.map(l => l.ms);
@@ -263,9 +228,7 @@ function addRow(name, tyaffMs, reactMs, preactMs, vanillaMs, tyaffOk, reactOk, p
 
     let html = `<td>${name}</td>`;
 
-    for (const lib of [{ ms: tyaffMs, ok: tyaffOk, name: 'tyaff', cls: 'tyaff' },
-                        { ms: reactMs, ok: reactOk, name: 'React', cls: 'react' },
-                        { ms: preactMs, ok: preactOk, name: 'Preact', cls: 'preact' }]) {
+    for (const lib of libs) {
         if (lib.ms == null) {
             html += `<td style="color:#484f58">&mdash;</td>`;
             continue;
@@ -290,7 +253,7 @@ function addRow(name, tyaffMs, reactMs, preactMs, vanillaMs, tyaffOk, reactOk, p
 }
 
 // ============================================================================
-// SCENARIO 1: MOUNT N ROWS (mount-only, no update — measureAsync)
+// SCENARIO 1: MOUNT N ROWS
 // ============================================================================
 
 async function benchMountRows() {
@@ -351,32 +314,6 @@ async function benchMountRows() {
         () => {}
     );
 
-    const preactMs = await measureAsync(
-        () => {},
-        () => {
-            const c = document.createElement('div');
-            arena.appendChild(c);
-            function List() {
-                return ph('table', null,
-                    ph('tbody', null,
-                        items.map(item =>
-                            ph('tr', { key: item.id },
-                                ph('td', null, String(item.id)),
-                                ph('td', null, item.text)
-                            )
-                        )
-                    )
-                );
-            }
-            prender(ph(List), c);
-            const ok = c.querySelectorAll('tr').length === N;
-            c.innerHTML = '';
-            arena.removeChild(c);
-            return ok;
-        },
-        () => {}
-    );
-
     const vanillaMs = await measureAsync(
         () => {},
         () => {
@@ -404,11 +341,11 @@ async function benchMountRows() {
         () => {}
     );
 
-    addRow(`Mount ${N} rows`, tyaffMs, reactMs, preactMs, vanillaMs, true, true, true);
+    addRow(`Mount ${N} rows`, tyaffMs, reactMs, vanillaMs, true, true);
 }
 
 // ============================================================================
-// SCENARIO 2: UPDATE 1 ROW (of N) — measureUpdateOnly
+// SCENARIO 2: UPDATE 1 ROW
 // ============================================================================
 
 async function benchUpdate1Row() {
@@ -468,38 +405,11 @@ async function benchUpdate1Row() {
         }
     );
 
-    let preactOk = false;
-    const preactMs = await measureUpdateOnly(
-        async () => {
-            const c = document.createElement('div');
-            arena.appendChild(c);
-            let setItems;
-            function List() {
-                const [state, ss] = useState([...items]);
-                setItems = ss;
-                return ph('div', null, state.map(item => ph('div', { key: item.id }, item.text)));
-            }
-            prender(ph(List), c);
-            await flush();
-            return { c, setItems };
-        },
-        async (ctx) => {
-            const copy = items.map(it => ({ ...it }));
-            copy[TARGET].text = 'UPDATED';
-            ctx.setItems(copy);
-        },
-        async (ctx) => {
-            preactOk = ctx.c.children[0].children[TARGET].textContent === 'UPDATED';
-            prender(null, ctx.c);
-            arena.removeChild(ctx.c);
-        }
-    );
-
-    addRow(`Update 1 of ${N}`, tyaffMs, reactMs, preactMs, null, tyaffOk, reactOk, preactOk);
+    addRow(`Update 1 of ${N}`, tyaffMs, reactMs, null, tyaffOk, reactOk);
 }
 
 // ============================================================================
-// SCENARIO 3: REVERSE N ITEMS (with keys) — measureUpdateOnly
+// SCENARIO 3: REVERSE
 // ============================================================================
 
 async function benchReverse() {
@@ -557,37 +467,11 @@ async function benchReverse() {
         }
     );
 
-    let preactOk = false;
-    const preactMs = await measureUpdateOnly(
-        async () => {
-            const items = base.map(it => ({ ...it }));
-            const c = document.createElement('div');
-            arena.appendChild(c);
-            let setItems;
-            function List() {
-                const [state, ss] = useState([...items]);
-                setItems = ss;
-                return ph('div', null, state.map(item => ph('div', { key: item.id }, item.text)));
-            }
-            prender(ph(List), c);
-            await flush();
-            return { c, setItems };
-        },
-        async (ctx) => {
-            ctx.setItems(prev => [...prev].reverse());
-        },
-        async (ctx) => {
-            preactOk = ctx.c.children[0].children[0].textContent === 'item ' + (N - 1);
-            prender(null, ctx.c);
-            arena.removeChild(ctx.c);
-        }
-    );
-
-    addRow(`Reverse ${N} (keys)`, tyaffMs, reactMs, preactMs, null, tyaffOk, reactOk, preactOk);
+    addRow(`Reverse ${N} (keys)`, tyaffMs, reactMs, null, tyaffOk, reactOk);
 }
 
 // ============================================================================
-// SCENARIO 4: SWAP FIRST AND LAST — measureUpdateOnly
+// SCENARIO 4: SWAP FIRST/LAST
 // ============================================================================
 
 async function benchSwapFirstLast() {
@@ -653,42 +537,11 @@ async function benchSwapFirstLast() {
         }
     );
 
-    let preactOk = false;
-    const preactMs = await measureUpdateOnly(
-        async () => {
-            const items = base.map(it => ({ ...it }));
-            const c = document.createElement('div');
-            arena.appendChild(c);
-            let setItems;
-            function List() {
-                const [state, ss] = useState([...items]);
-                setItems = ss;
-                return ph('div', null, state.map(item => ph('div', { key: item.id }, item.text)));
-            }
-            prender(ph(List), c);
-            await flush();
-            return { c, setItems, N };
-        },
-        async (ctx) => {
-            ctx.setItems(prev => {
-                const a = [...prev];
-                const t = a[0]; a[0] = a[ctx.N - 1]; a[ctx.N - 1] = t;
-                return a;
-            });
-        },
-        async (ctx) => {
-            preactOk = ctx.c.children[0].children[0].textContent === 'item ' + (ctx.N - 1) &&
-                       ctx.c.children[0].children[ctx.N - 1].textContent === 'item 0';
-            prender(null, ctx.c);
-            arena.removeChild(ctx.c);
-        }
-    );
-
-    addRow(`Swap first/last (${N})`, tyaffMs, reactMs, preactMs, null, tyaffOk, reactOk, preactOk);
+    addRow(`Swap first/last (${N})`, tyaffMs, reactMs, null, tyaffOk, reactOk);
 }
 
 // ============================================================================
-// SCENARIO 5: MOUNT N COMPONENTS (mount-only — measureAsync)
+// SCENARIO 5: MOUNT COMPONENTS
 // ============================================================================
 
 async function benchMountComponents() {
@@ -748,36 +601,11 @@ async function benchMountComponents() {
         () => {}
     );
 
-    const preactMs = await measureAsync(
-        () => {},
-        () => {
-            const c = document.createElement('div');
-            arena.appendChild(c);
-            function Item({ id, label }) {
-                return ph('div', { class: 'item' },
-                    ph('span', null, label),
-                    ph('span', { style: { color: 'gray' } }, '#' + id)
-                );
-            }
-            function List() {
-                const out = [];
-                for (let i = 0; i < N; i++) out.push(ph(Item, { key: i, id: i, label: 'Item' }));
-                return ph('div', null, ...out);
-            }
-            prender(ph(List), c);
-            const ok = c.querySelectorAll('.item').length === N;
-            c.innerHTML = '';
-            arena.removeChild(c);
-            return ok;
-        },
-        () => {}
-    );
-
-    addRow(`Mount ${N} components`, tyaffMs, reactMs, preactMs, null, true, true, true);
+    addRow(`Mount ${N} components`, tyaffMs, reactMs, null, true, true);
 }
 
 // ============================================================================
-// SCENARIO 6: DEEP TREE (mount-only — measureAsync)
+// SCENARIO 6: DEEP TREE
 // ============================================================================
 
 async function benchDeepTree() {
@@ -825,31 +653,11 @@ async function benchDeepTree() {
         () => {}
     );
 
-    function PreactW(props) { return ph('div', { class: 'level' }, props.children); }
-    let pTree = ph('span', null, 'leaf');
-    for (let i = 0; i < DEPTH; i++) pTree = ph(PreactW, null, pTree);
-
-    const preactMs = await measureAsync(
-        () => {},
-        () => {
-            const c = document.createElement('div');
-            arena.appendChild(c);
-            prender(pTree, c);
-            let d = 0, n = c.firstChild;
-            while (n && n.tagName === 'DIV') { d++; n = n.firstChild; }
-            const ok = d === DEPTH && n && n.textContent === 'leaf';
-            c.innerHTML = '';
-            arena.removeChild(c);
-            return ok;
-        },
-        () => {}
-    );
-
-    addRow(`Deep tree (${DEPTH} lvl)`, tyaffMs, reactMs, preactMs, null, true, true, true);
+    addRow(`Deep tree (${DEPTH} lvl)`, tyaffMs, reactMs, null, true, true);
 }
 
 // ============================================================================
-// SCENARIO 7: MOVE ELEMENT BETWEEN PARENTS (x50) — measureUpdateOnly
+// SCENARIO 7: MOVE BETWEEN PARENTS
 // ============================================================================
 
 async function benchMoveBetweenParents() {
@@ -922,42 +730,110 @@ async function benchMoveBetweenParents() {
         }
     );
 
-    let preactOk = false;
-    const preactMs = await measureUpdateOnly(
+    addRow(`Move between parents (x${MOVES})`, tyaffMs, reactMs, null, tyaffOk, reactOk);
+}
+
+// ============================================================================
+// SCENARIO 8: MOVE BETWEEN PARENTS (HEAVY) - 10 children
+// ============================================================================
+
+async function benchMoveBetweenParentsHeavy() {
+    const MOVES = 50;
+    const CHILD_COUNT = 10;
+
+    let tyaffOk = false;
+    const tyaffMs = await measureUpdateOnly(
         async () => {
             const c = document.createElement('div');
             arena.appendChild(c);
+            const Movable = Component({
+                init() { this._c = 0; },
+                render() {
+                    this._c++;
+                    // 10 детей с разным контентом
+                    const children = [];
+                    for (let i = 0; i < CHILD_COUNT; i++) {
+                        children.push(h('span', { className: 'child', key: i }, 'Child ' + i));
+                    }
+                    return h('div', { className: 'movable' }, ...children);
+                }
+            });
+            const App = Component({
+                position: 'left',
+                render() {
+                    return h('div', null,
+                        h('div', { id: 'L' }, this.position === 'left' && h(Movable, { key: 'mv' })),
+                        h('div', { id: 'R' }, this.position === 'right' && h(Movable, { key: 'mv' }))
+                    );
+                }
+            });
+            const v = mount(h(App), c);
+            await flush();
+            return { c, inst: v._instance };
+        },
+        async (ctx) => {
+            for (let i = 0; i < MOVES; i++) {
+                ctx.inst.update({ position: i % 2 === 0 ? 'right' : 'left' });
+                await Promise.resolve();
+            }
+        },
+        async (ctx) => {
+            const leftContent = ctx.c.querySelector('#L .movable');
+            const rightContent = ctx.c.querySelector('#R .movable');
+            const hasExactlyOne = (leftContent !== null) !== (rightContent !== null);
+            const hasChildren = (leftContent || rightContent).querySelectorAll('.child').length === CHILD_COUNT;
+            tyaffOk = hasExactlyOne && hasChildren;
+            mount(null, ctx.c);
+            arena.removeChild(ctx.c);
+        }
+    );
+
+    let reactOk = false;
+    const reactMs = await measureUpdateOnly(
+        async () => {
+            const c = document.createElement('div');
+            arena.appendChild(c);
+            function Movable() {
+                const children = [];
+                for (let i = 0; i < CHILD_COUNT; i++) {
+                    children.push(rh('span', { className: 'child', key: i }, 'Child ' + i));
+                }
+                return rh('div', { className: 'movable' }, ...children);
+            }
             let setPos;
             function App() {
-                const [pos, sp] = useState('left');
+                const [pos, sp] = RuseState('left');
                 setPos = sp;
-                return ph('div', null,
-                    ph('div', { id: 'L' }, pos === 'left' && ph('div', { key: 'mv' }, 'M')),
-                    ph('div', { id: 'R' }, pos === 'right' && ph('div', { key: 'mv' }, 'M'))
+                return rh('div', null,
+                    rh('div', { id: 'L' }, pos === 'left' && rh(Movable, { key: 'mv' })),
+                    rh('div', { id: 'R' }, pos === 'right' && rh(Movable, { key: 'mv' }))
                 );
             }
-            prender(ph(App), c);
+            Rrender(rh(App), c);
             await flush();
             return { c, setPos };
         },
         async (ctx) => {
             for (let i = 0; i < MOVES; i++) {
-                ctx.setPos(i % 2 === 0 ? 'right' : 'left');
+                RflushSync(() => ctx.setPos(i % 2 === 0 ? 'right' : 'left'));
             }
         },
         async (ctx) => {
-            const hasContent = (el) => el && el.children.length > 0;
-            preactOk = hasContent(ctx.c.querySelector('#L')) !== hasContent(ctx.c.querySelector('#R'));
-            prender(null, ctx.c);
+            const leftContent = ctx.c.querySelector('#L .movable');
+            const rightContent = ctx.c.querySelector('#R .movable');
+            const hasExactlyOne = (leftContent !== null) !== (rightContent !== null);
+            const hasChildren = (leftContent || rightContent).querySelectorAll('.child').length === CHILD_COUNT;
+            reactOk = hasExactlyOne && hasChildren;
+            unmountComponentAtNode(ctx.c);
             arena.removeChild(ctx.c);
         }
     );
 
-    addRow(`Move between parents (x${MOVES})`, tyaffMs, reactMs, preactMs, null, tyaffOk, reactOk, preactOk);
+    addRow(`Move heavy (x${MOVES}, ${CHILD_COUNT} children)`, tyaffMs, reactMs, null, tyaffOk, reactOk);
 }
 
 // ============================================================================
-// SCENARIO 8: CLEAR + REMOUNT (conditional render) — measureUpdateOnly
+// SCENARIO 9: CLEAR + REMOUNT
 // ============================================================================
 
 async function benchClearRemount() {
@@ -1020,38 +896,11 @@ async function benchClearRemount() {
         }
     );
 
-    let preactOk = false;
-    const preactMs = await measureUpdateOnly(
-        async () => {
-            const c = document.createElement('div');
-            arena.appendChild(c);
-            let setShow;
-            function List() {
-                const [show, ss] = useState(true);
-                setShow = ss;
-                if (!show) return ph('div', null);
-                return ph('div', null, items.map(item => ph('div', { key: item.id }, item.text)));
-            }
-            prender(ph(List), c);
-            await flush();
-            return { c, setShow };
-        },
-        async (ctx) => {
-            ctx.setShow(false);
-            ctx.setShow(true);
-        },
-        async (ctx) => {
-            preactOk = ctx.c.children[0].children.length === N;
-            prender(null, ctx.c);
-            arena.removeChild(ctx.c);
-        }
-    );
-
-    addRow(`Clear + remount (${N})`, tyaffMs, reactMs, preactMs, null, tyaffOk, reactOk, preactOk);
+    addRow(`Clear + remount (${N})`, tyaffMs, reactMs, null, tyaffOk, reactOk);
 }
 
 // ============================================================================
-// SCENARIO 9: UPDATE ALL ROWS (full props change) — measureUpdateOnly
+// SCENARIO 10: UPDATE ALL ROWS
 // ============================================================================
 
 async function benchUpdateAllRows() {
@@ -1108,37 +957,11 @@ async function benchUpdateAllRows() {
         }
     );
 
-    let preactOk = false;
-    const preactMs = await measureUpdateOnly(
-        async () => {
-            const items = Array.from({ length: N }, (_, i) => ({ id: i, text: 'row ' + i }));
-            const c = document.createElement('div');
-            arena.appendChild(c);
-            let setItems;
-            function List() {
-                const [state, ss] = useState([...items]);
-                setItems = ss;
-                return ph('div', null, state.map(item => ph('div', { key: item.id }, item.text)));
-            }
-            prender(ph(List), c);
-            await flush();
-            return { c, setItems };
-        },
-        async (ctx) => {
-            ctx.setItems(prev => prev.map((it, i) => ({ ...it, text: 'changed ' + i })));
-        },
-        async (ctx) => {
-            preactOk = ctx.c.children[0].children[0].textContent === 'changed 0';
-            prender(null, ctx.c);
-            arena.removeChild(ctx.c);
-        }
-    );
-
-    addRow(`Update all ${N} rows`, tyaffMs, reactMs, preactMs, null, tyaffOk, reactOk, preactOk);
+    addRow(`Update all ${N} rows`, tyaffMs, reactMs, null, tyaffOk, reactOk);
 }
 
 // ============================================================================
-// SCENARIO 10: INSERT IN MIDDLE — measureUpdateOnly
+// SCENARIO 11: INSERT MIDDLE
 // ============================================================================
 
 async function benchInsertMiddle() {
@@ -1201,42 +1024,11 @@ async function benchInsertMiddle() {
         }
     );
 
-    let preactOk = false;
-    const preactMs = await measureUpdateOnly(
-        async () => {
-            const items = Array.from({ length: N }, (_, i) => ({ id: i, text: 'item ' + i }));
-            const c = document.createElement('div');
-            arena.appendChild(c);
-            let setItems;
-            function List() {
-                const [state, ss] = useState([...items]);
-                setItems = ss;
-                return ph('div', null, state.map(item => ph('div', { key: item.id }, item.text)));
-            }
-            prender(ph(List), c);
-            await flush();
-            return { c, setItems, N };
-        },
-        async (ctx) => {
-            ctx.setItems(prev => {
-                const a = [...prev];
-                a.splice(Math.floor(ctx.N / 2), 0, { id: ctx.N, text: 'NEW' });
-                return a;
-            });
-        },
-        async (ctx) => {
-            preactOk = ctx.c.children[0].children.length === ctx.N + 1 &&
-                       ctx.c.children[0].children[Math.floor(ctx.N / 2)].textContent === 'NEW';
-            prender(null, ctx.c);
-            arena.removeChild(ctx.c);
-        }
-    );
-
-    addRow(`Insert middle (${N})`, tyaffMs, reactMs, preactMs, null, tyaffOk, reactOk, preactOk);
+    addRow(`Insert middle (${N})`, tyaffMs, reactMs, null, tyaffOk, reactOk);
 }
 
 // ============================================================================
-// SCENARIO 11: MEMO SKIP — parent re-renders, children unchanged
+// SCENARIO 12: MEMO SKIP
 // ============================================================================
 
 async function benchMemoSkip() {
@@ -1250,13 +1042,13 @@ async function benchMemoSkip() {
             arena.appendChild(c);
             const Child = Component({
                 memo(props) { return [props.text]; },
-                render(props) { return h('div', null, props.text); }
+                render(props) { return h('div', { className: 'memo-child' }, props.text); }
             });
             const Parent = Component({
                 tick: 0,
                 render() {
-                    return h('div', null,
-                        h('span', null, 'T:' + this.tick),
+                    return h('div', { className: 'parent' },
+                        h('span', { className: 'tick' }, 'T:' + this.tick),
                         ...childData.map(d => h(Child, { key: d.id, text: d.text }))
                     );
                 }
@@ -1270,8 +1062,8 @@ async function benchMemoSkip() {
             await Promise.resolve();
         },
         async (ctx) => {
-            tyaffOk = ctx.c.querySelector('span').textContent === 'T:1' &&
-                       ctx.c.querySelectorAll('div > div').length === COUNT;
+            tyaffOk = ctx.c.querySelector('.tick').textContent === 'T:1' &&
+                       ctx.c.querySelectorAll('.memo-child').length === COUNT;
             mount(null, ctx.c);
             arena.removeChild(ctx.c);
         }
@@ -1283,14 +1075,14 @@ async function benchMemoSkip() {
             const c = document.createElement('div');
             arena.appendChild(c);
             const Child = Rmemo(function Child({ text }) {
-                return rh('div', null, text);
+                return rh('div', { className: 'memo-child' }, text);
             });
             let setTick;
             function Parent() {
                 const [tick, st] = RuseState(0);
                 setTick = st;
-                return rh('div', null,
-                    rh('span', null, 'T:' + tick),
+                return rh('div', { className: 'parent' },
+                    rh('span', { className: 'tick' }, 'T:' + tick),
                     childData.map(d => rh(Child, { key: d.id, text: d.text }))
                 );
             }
@@ -1302,50 +1094,18 @@ async function benchMemoSkip() {
             RflushSync(() => ctx.setTick(1));
         },
         async (ctx) => {
-            reactOk = ctx.c.querySelector('span').textContent === 'T:1' &&
-                       ctx.c.querySelectorAll('div > div').length === COUNT;
+            reactOk = ctx.c.querySelector('.tick').textContent === 'T:1' &&
+                       ctx.c.querySelectorAll('.memo-child').length === COUNT;
             unmountComponentAtNode(ctx.c);
             arena.removeChild(ctx.c);
         }
     );
 
-    let preactOk = false;
-    const preactMs = await measureUpdateOnly(
-        async () => {
-            const c = document.createElement('div');
-            arena.appendChild(c);
-            const Child = Pmemo(function Child({ text }) {
-                return ph('div', null, text);
-            }, (prev, next) => prev.text === next.text);
-            let setTick;
-            function Parent() {
-                const [tick, st] = useState(0);
-                setTick = st;
-                return ph('div', null,
-                    ph('span', null, 'T:' + tick),
-                    childData.map(d => ph(Child, { key: d.id, text: d.text }))
-                );
-            }
-            prender(ph(Parent), c);
-            await flush();
-            return { c, setTick };
-        },
-        async (ctx) => {
-            ctx.setTick(1);
-        },
-        async (ctx) => {
-            preactOk = ctx.c.querySelector('span').textContent === 'T:1' &&
-                       ctx.c.querySelectorAll('div > div').length === COUNT;
-            prender(null, ctx.c);
-            arena.removeChild(ctx.c);
-        }
-    );
-
-    addRow(`Memo skip (${COUNT} children)`, tyaffMs, reactMs, preactMs, null, tyaffOk, reactOk, preactOk);
+    addRow(`Memo skip (${COUNT} children)`, tyaffMs, reactMs, null, tyaffOk, reactOk);
 }
 
 // ============================================================================
-// SCENARIO 12: NO MEMO — parent re-renders, all children re-render
+// SCENARIO 13: NO MEMO
 // ============================================================================
 
 async function benchNoMemo() {
@@ -1358,13 +1118,13 @@ async function benchNoMemo() {
             const c = document.createElement('div');
             arena.appendChild(c);
             const Child = Component({
-                render(props) { return h('div', null, props.text); }
+                render(props) { return h('div', { className: 'no-memo-child' }, props.text); }
             });
             const Parent = Component({
                 tick: 0,
                 render() {
-                    return h('div', null,
-                        h('span', null, 'T:' + this.tick),
+                    return h('div', { className: 'parent' },
+                        h('span', { className: 'tick' }, 'T:' + this.tick),
                         ...childData.map(d => h(Child, { key: d.id, text: d.text }))
                     );
                 }
@@ -1378,7 +1138,7 @@ async function benchNoMemo() {
             await Promise.resolve();
         },
         async (ctx) => {
-            tyaffOk = ctx.c.querySelector('span').textContent === 'T:1';
+            tyaffOk = ctx.c.querySelector('.tick').textContent === 'T:1';
             mount(null, ctx.c);
             arena.removeChild(ctx.c);
         }
@@ -1390,14 +1150,14 @@ async function benchNoMemo() {
             const c = document.createElement('div');
             arena.appendChild(c);
             function Child({ text }) {
-                return rh('div', null, text);
+                return rh('div', { className: 'no-memo-child' }, text);
             }
             let setTick;
             function Parent() {
                 const [tick, st] = RuseState(0);
                 setTick = st;
-                return rh('div', null,
-                    rh('span', null, 'T:' + tick),
+                return rh('div', { className: 'parent' },
+                    rh('span', { className: 'tick' }, 'T:' + tick),
                     childData.map(d => rh(Child, { key: d.id, text: d.text }))
                 );
             }
@@ -1409,48 +1169,17 @@ async function benchNoMemo() {
             RflushSync(() => ctx.setTick(1));
         },
         async (ctx) => {
-            reactOk = ctx.c.querySelector('span').textContent === 'T:1';
+            reactOk = ctx.c.querySelector('.tick').textContent === 'T:1';
             unmountComponentAtNode(ctx.c);
             arena.removeChild(ctx.c);
         }
     );
 
-    let preactOk = false;
-    const preactMs = await measureUpdateOnly(
-        async () => {
-            const c = document.createElement('div');
-            arena.appendChild(c);
-            function Child({ text }) {
-                return ph('div', null, text);
-            }
-            let setTick;
-            function Parent() {
-                const [tick, st] = useState(0);
-                setTick = st;
-                return ph('div', null,
-                    ph('span', null, 'T:' + tick),
-                    childData.map(d => ph(Child, { key: d.id, text: d.text }))
-                );
-            }
-            prender(ph(Parent), c);
-            await flush();
-            return { c, setTick };
-        },
-        async (ctx) => {
-            ctx.setTick(1);
-        },
-        async (ctx) => {
-            preactOk = ctx.c.querySelector('span').textContent === 'T:1';
-            prender(null, ctx.c);
-            arena.removeChild(ctx.c);
-        }
-    );
-
-    addRow(`No memo (${COUNT} children)`, tyaffMs, reactMs, preactMs, null, tyaffOk, reactOk, preactOk);
+    addRow(`No memo (${COUNT} children)`, tyaffMs, reactMs, null, tyaffOk, reactOk);
 }
 
 // ============================================================================
-// SCENARIO 13: MEMO HIT — 1 of 1000 children changed
+// SCENARIO 14: MEMO HIT
 // ============================================================================
 
 async function benchMemoHit() {
@@ -1465,12 +1194,12 @@ async function benchMemoHit() {
             const items = childData.map(d => ({ ...d }));
             const Child = Component({
                 memo(props) { return [props.text]; },
-                render(props) { return h('div', null, props.text); }
+                render(props) { return h('div', { className: 'memo-hit-child' }, props.text); }
             });
             const Parent = Component({
                 items: [...items],
                 render() {
-                    return h('div', null, ...this.items.map(d => h(Child, { key: d.id, text: d.text })));
+                    return h('div', { className: 'parent' }, ...this.items.map(d => h(Child, { key: d.id, text: d.text })));
                 }
             });
             const v = mount(h(Parent), c);
@@ -1483,7 +1212,7 @@ async function benchMemoHit() {
             await Promise.resolve();
         },
         async (ctx) => {
-            tyaffOk = ctx.c.children[0].children[500].textContent === 'CHANGED';
+            tyaffOk = ctx.c.querySelectorAll('.memo-hit-child')[500].textContent === 'CHANGED';
             mount(null, ctx.c);
             arena.removeChild(ctx.c);
         }
@@ -1496,13 +1225,13 @@ async function benchMemoHit() {
             arena.appendChild(c);
             const items = childData.map(d => ({ ...d }));
             const Child = Rmemo(function Child({ text }) {
-                return rh('div', null, text);
+                return rh('div', { className: 'memo-hit-child' }, text);
             });
             let setItems;
             function Parent() {
                 const [state, ss] = RuseState([...items]);
                 setItems = ss;
-                return rh('div', null, state.map(d => rh(Child, { key: d.id, text: d.text })));
+                return rh('div', { className: 'parent' }, state.map(d => rh(Child, { key: d.id, text: d.text })));
             }
             Rrender(rh(Parent), c);
             await flush();
@@ -1516,46 +1245,13 @@ async function benchMemoHit() {
             }));
         },
         async (ctx) => {
-            reactOk = ctx.c.children[0].children[500].textContent === 'CHANGED';
+            reactOk = ctx.c.querySelectorAll('.memo-hit-child')[500].textContent === 'CHANGED';
             unmountComponentAtNode(ctx.c);
             arena.removeChild(ctx.c);
         }
     );
 
-    let preactOk = false;
-    const preactMs = await measureUpdateOnly(
-        async () => {
-            const c = document.createElement('div');
-            arena.appendChild(c);
-            const items = childData.map(d => ({ ...d }));
-            const Child = Pmemo(function Child({ text }) {
-                return ph('div', null, text);
-            }, (prev, next) => prev.text === next.text);
-            let setItems;
-            function Parent() {
-                const [state, ss] = useState([...items]);
-                setItems = ss;
-                return ph('div', null, state.map(d => ph(Child, { key: d.id, text: d.text })));
-            }
-            prender(ph(Parent), c);
-            await flush();
-            return { c, setItems };
-        },
-        async (ctx) => {
-            ctx.setItems(prev => {
-                const a = prev.map(d => ({ ...d }));
-                a[500].text = 'CHANGED';
-                return a;
-            });
-        },
-        async (ctx) => {
-            preactOk = ctx.c.children[0].children[500].textContent === 'CHANGED';
-            prender(null, ctx.c);
-            arena.removeChild(ctx.c);
-        }
-    );
-
-    addRow(`Memo hit 1/${COUNT} changed`, tyaffMs, reactMs, preactMs, null, tyaffOk, reactOk, preactOk);
+    addRow(`Memo hit 1/${COUNT} changed`, tyaffMs, reactMs, null, tyaffOk, reactOk);
 }
 
 // ============================================================================
@@ -1570,6 +1266,7 @@ const scenarios = [
     ['Mount components', benchMountComponents],
     ['Deep tree', benchDeepTree],
     ['Move between parents', benchMoveBetweenParents],
+    ['Move heavy (10 children)', benchMoveBetweenParentsHeavy],
     ['Clear + remount', benchClearRemount],
     ['Update all rows', benchUpdateAllRows],
     ['Insert middle', benchInsertMiddle],
