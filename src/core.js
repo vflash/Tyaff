@@ -537,6 +537,62 @@ const CAMEL_TO_ATTR = {
     tabIndex: 'tabindex'
 };
 
+// ⚡ Оптимизация: вынесенный switch для HTML свойств (только установка)
+function setHTMLProp(dom, key, value) {
+    const strVal = value === true ? '' : "" + value;
+
+    switch (key) {
+        case 'class':
+        case 'className':
+            dom.className = strVal;
+            return true;
+        case 'id':
+            dom.id = strVal;
+            return true;
+        case 'title':
+            dom.title = strVal;
+            return true;
+        case 'src':
+            dom.src = strVal;
+            return true;
+        case 'href':
+            dom.href = strVal;
+            return true;
+        case 'alt':
+            dom.alt = strVal;
+            return true;
+        case 'name':
+            dom.name = strVal;
+            return true;
+        case 'placeholder':
+            dom.placeholder = strVal;
+            return true;
+        case 'disabled':
+            dom.disabled = !!value;
+            return true;
+        case 'readOnly':
+        case 'readonly':
+            dom.readOnly = !!value;
+            return true;
+        case 'hidden':
+            dom.hidden = !!value;
+            return true;
+        case 'tabIndex':
+        case 'tabindex':
+            dom.tabIndex = +value;
+            return true;
+        case 'draggable':
+            dom.draggable = !!value;
+            return true;
+        case 'contentEditable':
+        case 'contenteditable':
+            dom.contentEditable = value;
+            return true;
+        default:
+            return false;
+    }
+}
+
 // ⚡ Оптимизация: String(value) → "" + value, прямое присваивание свойств
 function applyProp(dom, key, value, namespace) {
     if (key === 'key' || key === 'ref' || key === 'children') return;
@@ -599,22 +655,24 @@ function applyProp(dom, key, value, namespace) {
         return;
     }
 
+    // ⚡ Оптимизация: style → style.cssText (быстрее чем setAttribute)
     if (key === 'style') {
         if (value == null) {
-            dom.removeAttribute('style');
+            dom.style.cssText = '';
         } else if (typeof value === 'object') {
             let css = '';
             for (const p in value) {
                 const cssProp = p.replace(/[A-Z]/g, m => '-' + m.toLowerCase());
                 css += cssProp + ':' + value[p] + ';';
             }
-            dom.setAttribute('style', css);
+            dom.style.cssText = css;
         } else {
-            dom.setAttribute('style', "" + value);
+            dom.style.cssText = "" + value;
         }
         return;
     }
 
+    // ⚡ Оптимизация: удаление атрибутов
     if (value === false || value == null) {
         if (isSVG) {
             if (key === 'xlinkHref') {
@@ -623,6 +681,7 @@ function applyProp(dom, key, value, namespace) {
                 dom.removeAttribute(key);
             }
         } else {
+            // ⚡ Для всех случаев — удаляем атрибут полностью
             const attr = CAMEL_TO_ATTR[key] || key.toLowerCase();
             dom.removeAttribute(attr);
         }
@@ -638,8 +697,11 @@ function applyProp(dom, key, value, namespace) {
         return;
     }
 
-    const attr = CAMEL_TO_ATTR[key] || key.toLowerCase();
-    dom.setAttribute(attr, value === true ? '' : "" + value);
+    // ⚡ Оптимизация: прямое присваивание DOM-свойств через вынесенную функцию
+    if (!setHTMLProp(dom, key, value)) {
+        const attr = CAMEL_TO_ATTR[key] || key.toLowerCase();
+        dom.setAttribute(attr, value === true ? '' : "" + value);
+    }
 }
 
 function applyProps(dom, oldProps, newProps, namespace) {
@@ -1098,6 +1160,7 @@ function reconcileHTML(oldVnode, newVnode, parentDOM, ctx, path, keyMap, namespa
 // Props helpers
 // ============================================================================
 
+// ⚡ Оптимизация: filter → ручной цикл с pre-allocation
 function buildIncomingProps(rawProps, childs) {
     const out = {};
     for (const k in rawProps) {
@@ -1108,8 +1171,15 @@ function buildIncomingProps(rawProps, childs) {
     if (rawProps && rawProps.children !== undefined) {
         out.children = rawProps.children;
     } else if (childs && childs.length > 0) {
-        const filtered = childs.filter(c => c !== null);
-        out.children = filtered.length === 1 ? filtered[0] : filtered;
+        // ⚡ Ручной цикл вместо filter
+        const filtered = [];
+        let len = 0;
+        for (let i = 0; i < childs.length; i++) {
+            if (childs[i] !== null) {
+                filtered[len++] = childs[i];
+            }
+        }
+        out.children = len === 1 ? filtered[0] : filtered;
     } else {
         out.children = null;
     }
