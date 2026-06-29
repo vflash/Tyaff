@@ -1255,3 +1255,58 @@ test('context propagation работает через memo-защищённый 
 ---
 
 *Последнее обновление: 2026-06-29*
+## 📌 Правила работы AIDEV
+
+- **Создание и удаление файлов** — только с одобрения пользователя
+- Все изменения в коде должны соответствовать SPEC.md
+- Документация (README, DOCS, SPEC, CHANGELOG) — зона AISEC
+### Исправлен баг: быстрая проверка memo блокировала обновление детей (2026-06-29)
+
+**Проблема:**
+В `update()` была быстрая проверка memo, которая возвращала `Promise.resolve(false)` при совпадении зависимостей, не запуская `_rerender()`. Это нарушало SPEC:
+
+> `memo()` блокирует `render()` **только для текущего компонента**. Дети всегда проходят свою цепочку `props -> memo -> render`, даже если родитель защищен memo().
+
+**Симптомы:**
+- SCENARIO 14: MEMO HIT в bench.html не работал корректно
+- Дети не обновлялись при memo hit у родителя
+- `console.log()` в `props()` детей не вызывался
+
+**Решение:**
+Удалена быстрая проверка из `update()`.
+
+**Результат:**
+- Теперь `update()` всегда планирует `_rerender()` (если нет других причин для early return)
+- `_rerender()` проверяет memo и блокирует только `render()` текущего компонента
+- Дети проходят через `reconcile()` и обновляются корректно
+- Соответствует SPEC и поведению React/Vue
+
+**Trade-off:**
+- Потеряна оптимизация ~30% для memo-защищенных компонентов при `update()` без patch
+- Но корректность важнее производительности
+
+
+## 2026-06-29 - Critical fix in _rerender()
+
+**Problem:** Accidentally broke code in _rerender() during previous patch:
+```javascript
+// WAS (broken):
+for (let i = 0; i < resolvers.length; i++) {
+    resolversi;  // Syntax error - just variable reference
+}
+```
+
+**Solution:** Fixed to correct call:
+```javascript
+// NOW (fixed):
+for (let i = 0; i < resolvers.length; i++) {
+    resolvers[i](shouldRender);  // Call resolver with shouldRender parameter
+}
+```
+
+**Impact:** 
+- Without this fix, Promise from update() never resolved
+- SCENARIO 14: MEMO HIT could not work correctly
+- All async updates were broken
+
+**Lesson:** Always check syntax after patches!

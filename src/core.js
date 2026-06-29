@@ -331,18 +331,6 @@ function attachInstanceAPI(inst) {
             return Promise.resolve(false);
         }
 
-        // ⚡ БЫСТРАЯ ПРОВЕРКА: update() без patch + memo() → проверить зависимости
-        if (patch === undefined && this._definition.memo) {
-            const newDeps = this._definition.memo.call(this, this.props);
-            if (this._prevMemo && newDeps.length === this._prevMemo.length) {
-                let same = true;
-                for (let i = 0; i < newDeps.length; i++) {
-                    if (newDeps[i] !== this._prevMemo[i]) { same = false; break; }
-                }
-                if (same) return Promise.resolve(false);
-            }
-        }
-
         if (patch && typeof patch === 'object') {
             // ⚡ Проверка на пустой объект через for...in вместо Object.keys()
             let hasKeys = false;
@@ -416,7 +404,6 @@ function attachInstanceAPI(inst) {
         return this.context(key, ...args);
     };
 }
-
 // ============================================================================
 // Keys
 // ============================================================================

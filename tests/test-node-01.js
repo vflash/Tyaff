@@ -730,6 +730,176 @@ if (hasDOM) {
             assert.equal(parentUpdated, 1, 'onUpdated не должен вызываться когда render заблокирован');
         });
     });
+
+    // =========================================================================
+    // MEMO HIT с props трансформацией — защита от регресса
+    // =========================================================================
+    describe('Memo hit с props трансформацией', () => {
+        test('parent memo блокирует render, но дети проходят props() → memo() → render()', async () => {
+            const container = createContainer();
+            const COUNT = 100;
+            const childData = Array.from({ length: COUNT }, (_, i) => ({ id: i, text: 'child ' + i }));
+
+            let childRenderCount = 0;
+            let childPropsCallCount = 0;
+            let childMemoCallCount = 0;
+            let parentRenderCount = 0;
+
+            const Child = Component({
+                props: ({items, index}) => ({text: items[index]?.text}),
+                memo(props) {
+                    childMemoCallCount++;
+                    return [props.text];
+                },
+                render(props) {
+                    childRenderCount++;
+                    return h('div', { className: 'child' }, props.text);
+                }
+            });
+
+            const Parent = Component({
+                items: [...childData],
+                memo: () => [],  // Всегда блокирует render родителя
+                render() {
+                    parentRenderCount++;
+                    var {items} = this;
+                    return h('div', { className: 'parent' },
+                        ...items.map((d, index) =>
+                            h(Child, { items, index, key: d.id })
+                        )
+                    );
+                }
+            });
+
+            const vnode = mount(Parent, container);
+            const parent = vnode._instance;
+
+            // После первого mount
+            assert.equal(parentRenderCount, 1, 'parent должен отрендериться 1 раз при mount');
+            assert.equal(childRenderCount, COUNT, 'все ' + COUNT + ' детей должны отрендериться при mount');
+
+            // Сбрасываем счётчики перед update
+            const initialChildRenders = childRenderCount;
+            const initialChildPropsCalls = childPropsCallCount;
+            const initialChildMemoCalls = childMemoCallCount;
+            const initialParentRenders = parentRenderCount;
+
+            // Изменяем один элемент
+            parent.items[50].text = 'CHANGED';
+            parent.update();
+            await delay(20);
+
+            // ⚡ Ключевые проверки:
+            // 1. Parent render заблокирован memo (пустой массив deps)
+            assert.equal(parentRenderCount, initialParentRenders,
+                'parent render должен быть заблокирован memo()');
+
+            // 2. Дети прошли через props() → memo()
+            assert.ok(childMemoCallCount > initialChildMemoCalls,
+                'дети должны вызвать memo() при update');
+
+            // 3. Только 50-й ребенок должен перерендериться (у него изменился text)
+            // Остальные 99 детей имеют те же deps в memo → не должны рендериться
+            const expectedRenders = initialChildRenders + 1;
+            assert.equal(childRenderCount, expectedRenders,
+                'только 1 ребенок (с изменённым text) должен перерендериться, ожидалось ' +
+                expectedRenders + ', получено ' + childRenderCount);
+
+            // 4. Проверяем что DOM обновился корректно
+            const children = container.querySelectorAll('.child');
+            assert.equal(children.length, COUNT, 'все ' + COUNT + ' детей должны быть в DOM');
+            assert.equal(children[50].textContent, 'CHANGED', '50-й ребенок должен иметь новый текст');
+            assert.equal(children[0].textContent, 'child 0', '0-й ребенок не должен измениться');
+        });
+
+        test('memo hit: все дети имеют одинаковые props → никто не рендерится', async () => {
+            const container = createContainer();
+            let childRenderCount = 0;
+            let childMemoCallCount = 0;
+
+            const Child = Component({
+                props: ({value}) => ({computed: value * 2}),
+                memo(props) {
+                    childMemoCallCount++;
+                    return [props.computed];
+                },
+                render(props) {
+                    childRenderCount++;
+                    return h('div', null, props.computed);
+                }
+            });
+
+            const Parent = Component({
+                value: 10,
+                memo: () => [],
+                render() {
+                    return h('div', null,
+                        h(Child, { value: this.value, key: 'a' }),
+                        h(Child, { value: this.value, key: 'b' }),
+                        h(Child, { value: this.value, key: 'c' })
+                    );
+                }
+            });
+
+            const vnode = mount(Parent, container);
+            const parent = vnode._instance;
+
+            const initialRenders = childRenderCount;
+            const initialMemoCalls = childMemoCallCount;
+
+            // Update без изменения value
+            parent.update({});
+            await delay(20);
+
+            // Parent заблокирован memo
+            // Дети получают те же props → memo возвращает те же deps → никто не рендерится
+            assert.equal(childRenderCount, initialRenders,
+                'никто из детей не должен перерендериться');
+            assert.ok(childMemoCallCount > initialMemoCalls,
+                'дети должны вызвать memo() для проверки');
+        });
+
+        test('memo hit: изменение parent state не влияет на детей с memo', async () => {
+            const container = createContainer();
+            let childRenderCount = 0;
+
+            const Child = Component({
+                memo(props) { return [props.text]; },
+                render(props) {
+                    childRenderCount++;
+                    return h('div', null, props.text);
+                }
+            });
+
+            const Parent = Component({
+                tick: 0,
+                items: [{id: 1, text: 'item1'}, {id: 2, text: 'item2'}],
+                memo() { return [this.tick]; },  // ✅ Parent рендерится при изменении tick
+                render() {
+                    return h('div', null,
+                        h('span', { className: 'tick' }, 'T:' + this.tick),
+                        ...this.items.map(item => h(Child, { key: item.id, text: item.text }))
+                    );
+                }
+            });
+
+            const vnode = mount(Parent, container);
+            const parent = vnode._instance;
+
+            const initialRenders = childRenderCount;
+
+            // Меняем tick (не влияет на children props)
+            parent.update({ tick: 1 });
+            await delay(20);
+
+            // Parent render вызывается (tick изменился)
+            // Дети получают те же props → их memo блокирует render
+            assert.equal(childRenderCount, initialRenders,
+                'дети не должны перерендериться при изменении parent state');
+            assert.equal(container.querySelector('.tick').textContent, 'T:1',
+                'tick должен обновиться в DOM');
+        });
+    });
 }
 
 console.log('\n✅ Test-node-01 инициализирован\n');
