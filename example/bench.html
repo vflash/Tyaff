@@ -104,7 +104,6 @@ td:first-child { color: #e6edf3; font-weight: bold; white-space: nowrap; }
     return h('div', null, p.value);
   }
 });</pre>
-      <div class="verdict">Функция в определении + deps-массив</div>
     </div>
     <div class="memo-card memo-react">
       <h3>React</h3>
@@ -113,7 +112,6 @@ td:first-child { color: #e6edf3; font-weight: bold; white-space: nowrap; }
     return rh('div', null, value);
   }
 );</pre>
-      <div class="verdict">HOC-обёртка + shallowEqual по умолчанию</div>
     </div>
   </div>
 </div>
@@ -368,8 +366,7 @@ async function benchUpdate1Row() {
         },
         async (ctx) => {
             ctx.inst.items[TARGET].text = 'UPDATED';
-            ctx.inst.update();
-            await Promise.resolve();
+            await ctx.inst.update();
         },
         async (ctx) => {
             tyaffOk = ctx.c.children[0].children[TARGET].textContent === 'UPDATED';
@@ -921,8 +918,7 @@ async function benchUpdateAllRows() {
         },
         async (ctx) => {
             for (let i = 0; i < ctx.inst.items.length; i++) ctx.inst.items[i].text = 'changed ' + i;
-            ctx.inst.update();
-            await Promise.resolve();
+            await ctx.inst.update();
         },
         async (ctx) => {
             tyaffOk = ctx.c.children[0].children[0].textContent === 'changed 0';
@@ -1032,7 +1028,8 @@ async function benchInsertMiddle() {
 // ============================================================================
 
 async function benchMemoSkip() {
-    const COUNT = 5000;
+    const { N: COUNT } = getConfig();
+
     const childData = Array.from({ length: COUNT }, (_, i) => ({ id: i, text: 'child ' + i }));
 
     let tyaffOk = false;
@@ -1058,8 +1055,7 @@ async function benchMemoSkip() {
             return { c, inst: v._instance };
         },
         async (ctx) => {
-            ctx.inst.update({ tick: ctx.inst.tick + 1 });
-            await Promise.resolve();
+            await ctx.inst.update({ tick: ctx.inst.tick + 1 });
         },
         async (ctx) => {
             tyaffOk = ctx.c.querySelector('.tick').textContent === 'T:1' &&
@@ -1109,7 +1105,7 @@ async function benchMemoSkip() {
 // ============================================================================
 
 async function benchNoMemo() {
-    const COUNT = 1000;
+    const { N: COUNT } = getConfig();
     const childData = Array.from({ length: COUNT }, (_, i) => ({ id: i, text: 'child ' + i }));
 
     let tyaffOk = false;
@@ -1183,7 +1179,7 @@ async function benchNoMemo() {
 // ============================================================================
 
 async function benchMemoHit() {
-    const COUNT = 1000;
+    const { N: COUNT } = getConfig();
     const childData = Array.from({ length: COUNT }, (_, i) => ({ id: i, text: 'child ' + i }));
 
     let tyaffOk = false;
@@ -1193,13 +1189,22 @@ async function benchMemoHit() {
             arena.appendChild(c);
             const items = childData.map(d => ({ ...d }));
             const Child = Component({
-                memo(props) { return [props.text]; },
-                render(props) { return h('div', { className: 'memo-hit-child' }, props.text); }
+                props: ({items, index}) => ({text: items[index]?.text}),
+                memo(props) {return [props.text]},
+                render(props) {
+                    return h('div', { className: 'memo-hit-child' }, props.text);
+                }
             });
             const Parent = Component({
                 items: [...items],
+                memo: () => [],
                 render() {
-                    return h('div', { className: 'parent' }, ...this.items.map(d => h(Child, { key: d.id, text: d.text })));
+                    var {items} = this;
+                    return h('div', { className: 'parent' },
+                        ...items.map((d, index) =>
+                            h(Child, { items, index, key: d.id, text: d.text })
+                        )
+                    );
                 }
             });
             const v = mount(h(Parent), c);
@@ -1208,8 +1213,7 @@ async function benchMemoHit() {
         },
         async (ctx) => {
             ctx.inst.items[500].text = 'CHANGED';
-            ctx.inst.update();
-            await Promise.resolve();
+            await ctx.inst.update();
         },
         async (ctx) => {
             tyaffOk = ctx.c.querySelectorAll('.memo-hit-child')[500].textContent === 'CHANGED';
@@ -1228,11 +1232,11 @@ async function benchMemoHit() {
                 return rh('div', { className: 'memo-hit-child' }, text);
             });
             let setItems;
-            function Parent() {
+            const Parent = Rmemo(function() {
                 const [state, ss] = RuseState([...items]);
                 setItems = ss;
                 return rh('div', { className: 'parent' }, state.map(d => rh(Child, { key: d.id, text: d.text })));
-            }
+            })
             Rrender(rh(Parent), c);
             await flush();
             return { c, setItems };

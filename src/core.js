@@ -248,76 +248,88 @@ function attachInstanceAPI(inst) {
     inst._rerender = function() {
         if (this._isUpdating) return;
         this._isUpdating = true;
+
         try {
-            const d = this._definition;
-            if (d.props) {
-                this.props = d.props.call(this, this._incomingProps);
+            _doRerender(this);
+        } catch (err) {
+            if (IS_DEV) {
+                const name = this._definition?.name || 'Component';
+                console.error('❌ Error in component "' + name + '":', err);
             } else {
-                this.props = this._incomingProps || {};
-            }
-
-            let shouldRender = true;
-            if (d.memo) {
-                const newDeps = d.memo.call(this, this.props);
-                if (this._prevMemo && newDeps.length === this._prevMemo.length) {
-                    let same = true;
-                    for (let i = 0; i < newDeps.length; i++) {
-                        if (newDeps[i] !== this._prevMemo[i]) { same = false; break; }
-                    }
-                    if (same) shouldRender = false;
-                }
-                this._prevMemo = newDeps;
-            }
-
-            const oldVdom = this._vdom;
-            let newVdom;
-
-            if (shouldRender) {
-                this._keyMap.clear();
-                if (oldVdom) populateKeyMap(oldVdom, '', this._keyMap);
-                this._isRendering = true;
-                try {
-                    newVdom = d.render.call(this, this.props);
-                } finally {
-                    this._isRendering = false;
-                }
-                checkDuplicateKeys(newVdom, '');
-            } else {
-                // memo заблокировал render — используем старый vnode
-                // ⚠️ НЕ делаем early return — reconcile обходит детей чтобы они обновились
-                newVdom = oldVdom;
-            }
-
-            const oldNodes = this._nodes;
-            const wasFirstRender = !oldVdom;
-
-            const newNodes = reconcile(
-                oldVdom, newVdom, this._parentDOM, this, '',
-                this._keyMap, this._namespace
-            );
-            const flat = Array.isArray(newNodes) ? newNodes : (newNodes ? [newNodes] : []);
-
-            if (!wasFirstRender && this._parentDOM) {
-                syncDOMChildren(this._parentDOM, oldNodes, flat);
-            }
-
-            this._nodes = flat;
-            this._vdom = newVdom;
-
-            if (shouldRender && !wasFirstRender && d.onUpdated) {
-                d.onUpdated.call(this);
-            }
-
-            const resolvers = this._updateResolvers;
-            this._updateResolvers = null;
-            if (resolvers) {
-                // ✅ ИСПРАВЛЕНИЕ БАГА: resolversi → resolvers[i](shouldRender)
-                for (let i = 0; i < resolvers.length; i++) {
-                    resolvers[i](shouldRender);
-                }
+                throw err; // В prod пробрасываем ошибку дальше
             }
         } finally {
             this._isUpdating = false;
+        }
+    };
+
+    function _doRerender(inst) {
+        const d = inst._definition;
+        if (d.props) {
+            inst.props = d.props.call(inst, inst._incomingProps);
+        } else {
+            inst.props = inst._incomingProps || {};
+        }
+
+        let shouldRender = true;
+        if (d.memo) {
+            const newDeps = d.memo.call(inst, inst.props);
+            if (inst._prevMemo && newDeps.length === inst._prevMemo.length) {
+                let same = true;
+                for (let i = 0; i < newDeps.length; i++) {
+                    if (newDeps[i] !== inst._prevMemo[i]) { same = false; break; }
+                }
+                if (same) shouldRender = false;
+            }
+            inst._prevMemo = newDeps;
+        }
+
+        const oldVdom = inst._vdom;
+        let newVdom;
+
+        if (shouldRender) {
+            inst._keyMap.clear();
+            if (oldVdom) populateKeyMap(oldVdom, '', inst._keyMap);
+            inst._isRendering = true;
+            try {
+                newVdom = d.render.call(inst, inst.props);
+            } finally {
+                inst._isRendering = false;
+            }
+            checkDuplicateKeys(newVdom, '');
+        } else {
+            // memo заблокировал render — используем старый vnode
+            // ⚠️ НЕ делаем early return — reconcile обходит детей чтобы они обновились
+            newVdom = oldVdom;
+        }
+
+        const oldNodes = inst._nodes;
+        const wasFirstRender = !oldVdom;
+
+        const newNodes = reconcile(
+            oldVdom, newVdom, inst._parentDOM, inst, '',
+            inst._keyMap, inst._namespace
+        );
+        const flat = Array.isArray(newNodes) ? newNodes : (newNodes ? [newNodes] : []);
+
+        if (!wasFirstRender && inst._parentDOM) {
+            syncDOMChildren(inst._parentDOM, oldNodes, flat);
+        }
+
+        inst._nodes = flat;
+        inst._vdom = newVdom;
+
+        if (shouldRender && !wasFirstRender && d.onUpdated) {
+            d.onUpdated.call(inst);
+        }
+
+        const resolvers = inst._updateResolvers;
+        inst._updateResolvers = null;
+        if (resolvers) {
+            // ✅ ИСПРАВЛЕНИЕ БАГА: resolversi → resolvers[i](shouldRender)
+            for (let i = 0; i < resolvers.length; i++) {
+                resolvers[i](shouldRender);
+            }
         }
     };
 
