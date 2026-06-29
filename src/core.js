@@ -274,10 +274,11 @@ function attachInstanceAPI(inst) {
         let shouldRender = true;
         if (d.memo) {
             const newDeps = d.memo.call(inst, inst.props);
-            if (inst._prevMemo && newDeps.length === inst._prevMemo.length) {
+            const prevMemo = inst._prevMemo;
+            if (prevMemo && newDeps.length === prevMemo.length) {
                 let same = true;
                 for (let i = 0; i < newDeps.length; i++) {
-                    if (newDeps[i] !== inst._prevMemo[i]) { same = false; break; }
+                    if (newDeps[i] !== prevMemo[i]) { same = false; break; }
                 }
                 if (same) shouldRender = false;
             }
