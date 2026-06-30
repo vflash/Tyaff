@@ -36,22 +36,12 @@ function pushAll(target, source) {
     }
 }
 
-const APPEND_CHUNK_SIZE = 20000;
-
 // ⚡ appendChild вместо prepend — проще и быстрее (замеры показали)
+// Чанки не нужны: appendChild в цикле не имеет лимита аргументов
 function appendAll(parent, nodes) {
-    if (!nodes || nodes.length === 0) return;
-    if (nodes.length <= APPEND_CHUNK_SIZE) {
-        for (let i = 0; i < nodes.length; i++) {
-            parent.appendChild(nodes[i]);
-        }
-        return;
-    }
-    for (let i = 0; i < nodes.length; i += APPEND_CHUNK_SIZE) {
-        const end = Math.min(nodes.length, i + APPEND_CHUNK_SIZE);
-        for (let j = i; j < end; j++) {
-            parent.appendChild(nodes[j]);
-        }
+    if (!nodes) return;
+    for (let i = 0; i < nodes.length; i++) {
+        parent.appendChild(nodes[i]);
     }
 }
 

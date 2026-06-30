@@ -882,3 +882,83 @@ No memo, Insert middle, Update all rows ускорились потому что
 ### Ожидание для браузера
 
 В браузере Mount 5000 components: 46.4ms → ~37ms (догнать React 34.8ms). Нужно подтвердить через bench.html.
+---
+
+## Fast path в reconcileHTML: skip reconcileChildren (2026-07-01)
+
+### Контекст
+
+Update 1 of 5000: React 1.0-2.2ms, tyaff 2.2-2.7ms (1.0-1.3x отрыв). Цель — стабильно догнать React.
+
+### Анализ
+
+Для Update 1 of 5000 на каждый из 5000 div'ов в `reconcileChildren`:
+```
+reconcile(oc, nc) → reconcileHTML:
+  - shallow props compare → skip applyProps ✅ (уже было)
+  - reconcileChildren для текста:
+    - collectDOMNodes(oldChilds=1 text) ← O(1), но вызов функции
+    - reconcile(text, text) → text skip ✅ (уже было)
+    - syncDOMChildren(dom, [text], [text]) ← n===o, skip
+```
+
+Уже было 2 skip'а, но **вызов `reconcileChildren` + `collectDOMNodes` + `syncDOMChildren`** всё равно делался для каждого из 5000 детей.
+
+### Что изменилось
+
+Fast path в `reconcileHTML` — если props не изменились И дети — одиночный текстовый узел без изменений → skip `reconcileChildren`:
+
+```javascript
+if (!propsChanged) {
+    const oc = oldVnode.childs;
+    const nc = newVnode.childs;
+    if (oc === nc) {
+        // Та же ссылка на childs — точно не изменились
+        newVnode._nodes = oldVnode._nodes;
+        return dom;
+    }
+    if (oc && nc && oc.length === 1 && nc.length === 1) {
+        const oc0 = oc[0], nc0 = nc[0];
+        if (oc0 && nc0
+            && oc0._text !== undefined
+            && nc0._text !== undefined
+            && oc0._text === nc0._text) {
+            // Одинаковый текстовый ребёнок — переиспользуем DOM и _nodes
+            nc0._el = oc0._el;
+            newVnode._nodes = oldVnode._nodes;
+            return dom;
+        }
+    }
+}
+```
+
+Пропускает: `collectDOMNodes` + `reconcile` для текста + `syncDOMChildren`.
+
+### Замеры (happy-dom, N=5000, 5 прогонов, среднее)
+
+| Сценарий | v5 (без fast path) | v6 (с fast path) | Эффект |
+|----------|--------------------|--------------------|--------|
+| **Update 1 of 5000** | 4.29 ms | **3.24 ms** | **-24%** 🔥 |
+| Insert middle | 4.90 ms | 4.44 ms | -9% |
+| Update all rows | 5.72 ms | 5.88 ms | паритет |
+| Memo skip | ~4.4 ms | ~6.1 ms (1 замер) | нужно больше замеров |
+| No memo | ~8.2 ms | ~6.9 ms (1 замер) | -15% |
+
+### Тесты
+
+Все 134 теста проходят (test-node-01..05).
+
+### Безопасность
+
+Fast path срабатывает только когда:
+1. `!propsChanged` — props shallow equal (уже проверяется выше)
+2. `oc === nc` (та же ссылка) ИЛИ `oc[0]._text === nc[0]._text` (одинаковый текст)
+
+В обоих случаях поддерево гарантированно не изменилось → переиспользуем `oldVnode._nodes` и `oc0._el`. Это безопасно потому что:
+- DOM-узел текста остаётся тот же (`nc0._el = oc0._el`)
+- `_nodes` массив остаётся тот же (`newVnode._nodes = oldVnode._nodes`)
+- Если текст изменился — fast path не срабатывает, идёт обычный `reconcileChildren` с text skip
+
+### Ожидание для браузера
+
+Update 1 of 5000: 2.2ms → ~1.7ms (догнать React 1.0-2.2ms). Нужно подтвердить через bench.html.

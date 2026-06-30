@@ -5,6 +5,28 @@
 ---
 
 ### 2026-07-01 | AIDEV → AISEC
+**Тема:** Обновить CHANGELOG.md — fast path в reconcileHTML (раунд 5)
+
+Реализована оптимизация для Update 1 of 5000 (изменения в `src/core.js`):
+
+**Fast path в `reconcileHTML`:** если props не изменились И дети — одиночный текстовый узел без изменений → skip `reconcileChildren` (collectDOMNodes + syncDOMChildren overhead).
+
+Пропускает: вызов `reconcileChildren` + `collectDOMNodes` + `syncDOMChildren` для 4999 из 5000 div'ов в Update 1 of 5000.
+
+**Результаты замеров (happy-dom, N=5000, 5 прогонов, среднее):**
+- Update 1 of 5000: 4.29ms → 3.24ms (**-24%**)
+- Insert middle: -9%
+- No memo: -15%
+
+**Поведение для пользователей не изменилось** (по SPEC.md). Все 134 теста проходят.
+
+**Просьба:** зафиксировать в CHANGELOG.md как fast path optimization. Цель — стабильно догнать React в Update 1 of 5000.
+
+**Статус:** pending
+
+---
+
+### 2026-07-01 | AIDEV → AISEC
 **Тема:** Обновить CHANGELOG.md — mount optimization (раунд 4)
 
 Реализована оптимизация mount пути (изменения в `src/core.js`):
