@@ -121,10 +121,29 @@ td:first-child { color: #e6edf3; font-weight: bold; white-space: nowrap; }
 <script type="module">
 
 import { h, Component, mount, Fragment } from '../src/core.js';
-import React, { useState as RuseState, memo as Rmemo } from 'https://esm.sh/react@18.3.1';
-import { render as Rrender, flushSync as RflushSync, unmountComponentAtNode } from 'https://esm.sh/react-dom@18.3.1';
+import React, { useState as RuseState, memo as Rmemo } from 'https://esm.sh/react@19.2.7';
+import { createRoot as RcreateRoot } from 'https://esm.sh/react-dom@19.2.7/client';
+import { flushSync as RflushSync } from 'https://esm.sh/react-dom@19.2.7';
 
 const rh = React.createElement;
+
+// React 19 убрал render/unmountComponentAtNode — обёртки через createRoot
+const _roots = new WeakMap();
+function Rrender(vnode, container) {
+    let root = _roots.get(container);
+    if (!root) {
+        root = RcreateRoot(container);
+        _roots.set(container, root);
+    }
+    root.render(vnode);
+}
+function unmountComponentAtNode(container) {
+    const root = _roots.get(container);
+    if (root) {
+        root.unmount();
+        _roots.delete(container);
+    }
+}
 
 // ============================================================================
 // DOM REFS & CONFIG
@@ -303,7 +322,7 @@ async function benchMountRows() {
                     )
                 );
             }
-            Rrender(rh(List), c);
+            RflushSync(() => Rrender(rh(List), c));
             const ok = c.querySelectorAll('tr').length === N;
             unmountComponentAtNode(c);
             arena.removeChild(c);
@@ -386,7 +405,7 @@ async function benchUpdate1Row() {
                 setItems = ss;
                 return rh('div', null, state.map(item => rh('div', { key: item.id }, item.text)));
             }
-            Rrender(rh(List), c);
+            RflushSync(() => Rrender(rh(List), c));
             await flush();
             return { c, setItems };
         },
@@ -450,7 +469,7 @@ async function benchReverse() {
                 setItems = ss;
                 return rh('div', null, state.map(item => rh('div', { key: item.id }, item.text)));
             }
-            Rrender(rh(List), c);
+            RflushSync(() => Rrender(rh(List), c));
             await flush();
             return { c, setItems };
         },
@@ -515,7 +534,7 @@ async function benchSwapFirstLast() {
                 setItems = ss;
                 return rh('div', null, state.map(item => rh('div', { key: item.id }, item.text)));
             }
-            Rrender(rh(List), c);
+            RflushSync(() => Rrender(rh(List), c));
             await flush();
             return { c, setItems, N };
         },
@@ -589,7 +608,7 @@ async function benchMountComponents() {
                 for (let i = 0; i < N; i++) out.push(rh(Item, { key: i, id: i, label: 'Item' }));
                 return rh('div', null, ...out);
             }
-            Rrender(rh(List), c);
+            RflushSync(() => Rrender(rh(List), c));
             const ok = c.querySelectorAll('.item').length === N;
             unmountComponentAtNode(c);
             arena.removeChild(c);
@@ -639,7 +658,7 @@ async function benchDeepTree() {
         () => {
             const c = document.createElement('div');
             arena.appendChild(c);
-            Rrender(rTree, c);
+            RflushSync(() => Rrender(rTree, c));
             let d = 0, n = c.firstChild;
             while (n && n.tagName === 'DIV') { d++; n = n.firstChild; }
             const ok = d === DEPTH && n && n.textContent === 'leaf';
@@ -710,7 +729,7 @@ async function benchMoveBetweenParents() {
                     rh('div', { id: 'R' }, pos === 'right' && rh('div', { key: 'mv' }, 'M'))
                 );
             }
-            Rrender(rh(App), c);
+            RflushSync(() => Rrender(rh(App), c));
             await flush();
             return { c, setPos };
         },
@@ -806,7 +825,7 @@ async function benchMoveBetweenParentsHeavy() {
                     rh('div', { id: 'R' }, pos === 'right' && rh(Movable, { key: 'mv' }))
                 );
             }
-            Rrender(rh(App), c);
+            RflushSync(() => Rrender(rh(App), c));
             await flush();
             return { c, setPos };
         },
@@ -878,7 +897,7 @@ async function benchClearRemount() {
                 if (!show) return rh('div', null);
                 return rh('div', null, items.map(item => rh('div', { key: item.id }, item.text)));
             }
-            Rrender(rh(List), c);
+            RflushSync(() => Rrender(rh(List), c));
             await flush();
             return { c, setShow };
         },
@@ -939,7 +958,7 @@ async function benchUpdateAllRows() {
                 setItems = ss;
                 return rh('div', null, state.map(item => rh('div', { key: item.id }, item.text)));
             }
-            Rrender(rh(List), c);
+            RflushSync(() => Rrender(rh(List), c));
             await flush();
             return { c, setItems };
         },
@@ -1001,7 +1020,7 @@ async function benchInsertMiddle() {
                 setItems = ss;
                 return rh('div', null, state.map(item => rh('div', { key: item.id }, item.text)));
             }
-            Rrender(rh(List), c);
+            RflushSync(() => Rrender(rh(List), c));
             await flush();
             return { c, setItems, N };
         },
@@ -1082,7 +1101,7 @@ async function benchMemoSkip() {
                     childData.map(d => rh(Child, { key: d.id, text: d.text }))
                 );
             }
-            Rrender(rh(Parent), c);
+            RflushSync(() => Rrender(rh(Parent), c));
             await flush();
             return { c, setTick };
         },
@@ -1157,7 +1176,7 @@ async function benchNoMemo() {
                     childData.map(d => rh(Child, { key: d.id, text: d.text }))
                 );
             }
-            Rrender(rh(Parent), c);
+            RflushSync(() => Rrender(rh(Parent), c));
             await flush();
             return { c, setTick };
         },
@@ -1237,7 +1256,7 @@ async function benchMemoHit() {
                 setItems = ss;
                 return rh('div', { className: 'parent' }, state.map(d => rh(Child, { key: d.id, text: d.text })));
             })
-            Rrender(rh(Parent), c);
+            RflushSync(() => Rrender(rh(Parent), c));
             await flush();
             return { c, setItems };
         },
