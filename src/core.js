@@ -7,7 +7,6 @@ const Portal = Symbol('Portal');
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const XLINK_NS = 'http://www.w3.org/1999/xlink';
 const HTML_NS = 'http://www.w3.org/1999/xhtml';
-const TEXT_VNODE = Symbol('Text');
 
 // Шара для пустых результатов reconcile2 — caller'ы только читают, не мутируют.
 const EMPTY = [];
@@ -94,14 +93,14 @@ function h(type, props, ...children) {
     // Не создаём normalized — экономим аллокацию массива.
     for (let i = 0; i < children.length; i++) {
         const c = children[i];
-        if (c === false || c === true) {
+        if (typeof c === 'string' || typeof c === 'number') {
+            children[i] = { _text: "" + c };
+        } else if (c == undefined || c === false || c === true) {
             children[i] = null;
-        } else if (typeof c === 'string' || typeof c === 'number') {
-            children[i] = { tag: TEXT_VNODE, _text: "" + c };
         }
         // else: vnode — уже на месте, не трогаем
     }
-    return { tag: type, props: props || false, childs: children };
+    return { tag: type, props: props || {}, childs: children };
 }
 
 function createPortal(children, containerGetter) {
