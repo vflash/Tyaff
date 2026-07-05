@@ -480,7 +480,82 @@ if (hasDOM) {
             assert.equal(items[1].textContent, '1');
             assert.equal(items[2].textContent, '2');
         });
+
+        // =================================================================
+        // SPEC: "Элемент сохраняется (instance/DOM не пересоздаётся) если
+        // тип элемента совпадает и идентификатор совпадает"
+        // Элемент с user key имеет идентификатор #key — не зависит от позиции.
+        // При перемещении в массиве детей DOM-узел должен сохраняться.
+        // =================================================================
+
+        test('HTML элемент с key сохраняет DOM-узел при reorder (spread)', async () => {
+            // Паттерн со spread: h('div', null, ...arr) — arr разворачивается
+            const container = createContainer();
+            const List = Component({
+                order: [1, 2, 3],
+                render() {
+                    return h('div', null,
+                        ...this.order.map(id => h('div', { key: id, className: 'item' }, String(id)))
+                    );
+                }
+            });
+            const v = mount(List, container);
+            const inst = v._instance;
+            await delay(10);
+
+            const divsBefore = Array.from(container.querySelectorAll('.item'));
+            assert.equal(divsBefore.length, 3);
+
+            // Reorder: [1,2,3] → [3,1,2]
+            inst.order = [3, 1, 2];
+            inst.update();
+            await delay(20);
+
+            const divsAfter = Array.from(container.querySelectorAll('.item'));
+            assert.equal(divsAfter.length, 3);
+
+            // SPEC: DOM-узлы должны сохраниться (тот же физический узел)
+            assert.equal(divsAfter[0], divsBefore[2], 'div(key:3) должен быть тем же DOM-узлом');
+            assert.equal(divsAfter[1], divsBefore[0], 'div(key:1) должен быть тем же DOM-узлом');
+            assert.equal(divsAfter[2], divsBefore[1], 'div(key:2) должен быть тем же DOM-узлом');
+
+            // Порядок текста
+            assert.equal(divsAfter[0].textContent, '3');
+            assert.equal(divsAfter[1].textContent, '1');
+            assert.equal(divsAfter[2].textContent, '2');
+        });
+
+        test('HTML элемент с key сохраняет DOM при удалении первого (spread)', async () => {
+            const container = createContainer();
+            const List = Component({
+                order: [1, 2, 3],
+                render() {
+                    return h('div', null,
+                        ...this.order.map(id => h('div', { key: id, className: 'item' }, String(id)))
+                    );
+                }
+            });
+            const v = mount(List, container);
+            const inst = v._instance;
+            await delay(10);
+
+            const divsBefore = Array.from(container.querySelectorAll('.item'));
+
+            // Удалить первый: [1,2,3] → [2,3]
+            inst.order = [2, 3];
+            inst.update();
+            await delay(20);
+
+            const divsAfter = Array.from(container.querySelectorAll('.item'));
+            assert.equal(divsAfter.length, 2);
+
+            // SPEC: div(key:2) и div(key:3) должны сохранить свои DOM-узлы
+            assert.equal(divsAfter[0], divsBefore[1], 'div(key:2) должен быть тем же DOM-узлом');
+            assert.equal(divsAfter[1], divsBefore[2], 'div(key:3) должен быть тем же DOM-узлом');
+        });
+
+
     });
 }
 
-console.log('\n✅ Test-node-05 инициализирован (16 тестов)\n');
+console.log('\n✅ Test-node-05 инициализирован (18 тестов)\n');

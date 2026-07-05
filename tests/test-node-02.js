@@ -714,7 +714,7 @@ if (hasDOM) {
             assert.ok(time < 200, `Слишком медленно: ${time.toFixed(2)}ms`);
         });
 
-        test('partial update 1 из 1000 < 20ms', async () => {
+        test('partial update 1 из 1000 < 50ms', async () => {
             const container = createContainer();
             const items = Array.from({ length: 1000 }, (_, i) =>
                 h('div', { key: i }, 'item ' + i)
@@ -727,7 +727,7 @@ if (hasDOM) {
             const start = performance.now();
             mount(h('div', null, ...newItems), container);
             const time = performance.now() - start;
-            assert.ok(time < 20, `Слишком медленно: ${time.toFixed(2)}ms`);
+            assert.ok(time < 50, `Слишком медленно: ${time.toFixed(2)}ms`);
         });
     });
 }

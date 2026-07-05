@@ -73,8 +73,9 @@ td:first-child { color: #e6edf3; font-weight: bold; white-space: nowrap; }
 
 <div class="controls">
     <button class="btn btn-run" id="runBtn">&#9654; RUN</button>
-    <label>Warmup <input id="warmupInput" type="number" value="5" min="1" max="50"></label>
-    <label>Runs <input id="runsInput" type="number" value="15" min="3" max="100"></label>
+    <button class="btn" id="debugBtn" title="Warmup=0, Runs=1 для исследований">ONE</button>
+    <label>Warmup <input id="warmupInput" type="number" value="5" min="0" max="50"></label>
+    <label>Runs <input id="runsInput" type="number" value="15" min="1" max="100"></label>
     <label>Rows <input id="rowsInput" type="number" value="5000" min="100" max="50000" step="1000" class="rows-input"></label>
 </div>
 
@@ -87,34 +88,6 @@ td:first-child { color: #e6edf3; font-weight: bold; white-space: nowrap; }
 <tbody id="results"></tbody>
 </table>
 
-<p class="note">Update-сценарии (2-10, 11-14): mount в setup, замеряется только update. Mount-сценарии (1, 5, 6): mount + cleanup в замере.</p>
-
-<!-- Memo API comparison -->
-<div class="memo-section">
-  <h2>&#128736; Сравнение memo API</h2>
-  <p class="subtitle">Как предотвратить лишний рендер дочернего компонента, когда поменялись только props родителя</p>
-  <div class="memo-grid">
-    <div class="memo-card memo-tyaff">
-      <h3>tyaff</h3>
-      <pre>const Item = Component({
-  <b style="color:#3fb950">memo(p)</b> {
-    return [p.value];
-  },
-  render(p) {
-    return h('div', null, p.value);
-  }
-});</pre>
-    </div>
-    <div class="memo-card memo-react">
-      <h3>React</h3>
-      <pre>const Item = <b style="color:#f85149">React.memo</b>(
-  function Item({ value }) {
-    return rh('div', null, value);
-  }
-);</pre>
-    </div>
-  </div>
-</div>
 
 <div id="arena"></div>
 
@@ -150,14 +123,22 @@ function unmountComponentAtNode(container) {
 // ============================================================================
 
 const runBtn = document.getElementById('runBtn');
+const debugBtn = document.getElementById('debugBtn');
 const statusEl = document.getElementById('status');
 const resultsEl = document.getElementById('results');
 const arena = document.getElementById('arena');
 
+debugBtn.addEventListener('click', () => {
+    document.getElementById('warmupInput').value = '0';
+    document.getElementById('runsInput').value = '1';
+});
+
 function getConfig() {
+    const warmup = parseInt(document.getElementById('warmupInput').value);
+    const runs = parseInt(document.getElementById('runsInput').value);
     return {
-        warmup: parseInt(document.getElementById('warmupInput').value) || 5,
-        runs: parseInt(document.getElementById('runsInput').value) || 15,
+        warmup: isNaN(warmup) ? 5 : warmup,
+        runs: isNaN(runs) ? 15 : runs,
         N: parseInt(document.getElementById('rowsInput').value) || 5000,
     };
 }
@@ -173,6 +154,15 @@ function flush() {
 function median(arr) {
     const s = [...arr].sort((a, b) => a - b);
     return s[Math.floor(s.length / 2)];
+}
+
+function minOf(arr) {
+    return Math.min(...arr);
+}
+
+// Возвращает { median, min } — median для стабильности, min для лучшего случая.
+function stats(arr) {
+    return { median: median(arr), min: minOf(arr) };
 }
 
 async function measureAsync(setup, run, cleanup) {
@@ -197,7 +187,7 @@ async function measureAsync(setup, run, cleanup) {
         cleanup();
         await flush();
     }
-    return median(times);
+    return stats(times);
 }
 
 async function measureUpdateOnly(setupAsync, runAsync, cleanupAsync) {
@@ -220,7 +210,7 @@ async function measureUpdateOnly(setupAsync, runAsync, cleanupAsync) {
         await cleanupAsync(ctx);
         await flush();
     }
-    return median(times);
+    return stats(times);
 }
 
 function setStatus(text, phase = '') {
@@ -230,36 +220,40 @@ function setStatus(text, phase = '') {
     statusEl.innerHTML = phaseHtml + text;
 }
 
-function addRow(name, tyaffMs, reactMs, vanillaMs, tyaffOk, reactOk) {
+function addRow(name, tyaffStats, reactStats, vanillaStats, tyaffOk, reactOk) {
     const tr = document.createElement('tr');
     const libs = [
-        { ms: tyaffMs, ok: tyaffOk, name: 'tyaff', cls: 'tyaff' },
-        { ms: reactMs, ok: reactOk, name: 'React', cls: 'react' },
-    ].filter(l => l.ms != null);
+        { s: tyaffStats, ok: tyaffOk, name: 'tyaff', cls: 'tyaff' },
+        { s: reactStats, ok: reactOk, name: 'React', cls: 'react' },
+    ].filter(l => l.s != null);
 
-    const allMs = libs.map(l => l.ms);
-    const maxMs = Math.max(...allMs, vanillaMs || 0);
-    const minMs = Math.min(...allMs);
-    const winnerLib = libs.find(l => l.ms === minMs);
-    const ratio = maxMs / minMs;
+    // Сравнение по median
+    const allMedian = libs.map(l => l.s.median);
+    const maxMedian = Math.max(...allMedian, vanillaStats?.median || 0);
+    const minMedian = Math.min(...allMedian);
+    const winnerLib = libs.find(l => l.s.median === minMedian);
+    const ratio = maxMedian / minMedian;
 
     let html = `<td>${name}</td>`;
 
     for (const lib of libs) {
-        if (lib.ms == null) {
+        if (lib.s == null) {
             html += `<td style="color:#484f58">&mdash;</td>`;
             continue;
         }
-        const isW = lib.ms === minMs;
+        const isW = lib.s.median === minMedian;
         const cls = isW ? 'winner' : 'loser';
         const chk = lib.ok ? '<span class="check">&#10003;</span>' : '<span class="check check-fail">&#10007;</span>';
-        const pct = (lib.ms / maxMs * 100).toFixed(1);
-        html += `<td class="${cls}">${lib.ms.toFixed(2)}ms <span class="badge badge-${lib.cls}">${lib.name}</span>${chk}
+        const pct = (lib.s.median / maxMedian * 100).toFixed(1);
+        // Показываем median и min
+        const minHtml = lib.s.min < lib.s.median ? ` <span style="color:#7a838b;font-size:0.85em">(min ${lib.s.min.toFixed(2)})</span>` : '';
+        html += `<td class="${cls}">${lib.s.median.toFixed(2)}ms${minHtml} <span class="badge badge-${lib.cls}">${lib.name}</span>${chk}
             <div class="bar"><div class="bar-fill bar-${lib.cls}" style="width:${pct}%"></div></div></td>`;
     }
 
-    if (vanillaMs != null) {
-        html += `<td>${vanillaMs.toFixed(2)}ms <span class="badge badge-vanilla">vanilla</span></td>`;
+    if (vanillaStats != null) {
+        const minHtml = vanillaStats.min < vanillaStats.median ? ` <span style="color:#7a838b;font-size:0.85em">(min ${vanillaStats.min.toFixed(2)})</span>` : '';
+        html += `<td>${vanillaStats.median.toFixed(2)}ms${minHtml} <span class="badge badge-vanilla">vanilla</span></td>`;
     } else {
         html += `<td style="color:#484f58">&mdash;</td>`;
     }
@@ -277,6 +271,7 @@ async function benchMountRows() {
     const { N } = getConfig();
     const items = Array.from({ length: N }, (_, i) => ({ id: i, text: 'row ' + i }));
 
+    let tyaffOk = false;
     const tyaffMs = await measureAsync(
         () => {},
         () => {
@@ -286,7 +281,7 @@ async function benchMountRows() {
                 render() {
                     return h('table', null,
                         h('tbody', null,
-                            ...items.map(item =>
+                            items.map(item =>
                                 h('tr', { key: item.id },
                                     h('td', null, String(item.id)),
                                     h('td', null, item.text)
@@ -297,14 +292,14 @@ async function benchMountRows() {
                 }
             });
             mount(h(List), c);
-            const ok = c.querySelectorAll('tr').length === N;
+            tyaffOk = c.querySelectorAll('tr').length === N;
             c.innerHTML = '';
             arena.removeChild(c);
-            return ok;
         },
         () => {}
     );
 
+    let reactOk = false;
     const reactMs = await measureAsync(
         () => {},
         () => {
@@ -323,10 +318,9 @@ async function benchMountRows() {
                 );
             }
             RflushSync(() => Rrender(rh(List), c));
-            const ok = c.querySelectorAll('tr').length === N;
+            reactOk = c.querySelectorAll('tr').length === N;
             unmountComponentAtNode(c);
             arena.removeChild(c);
-            return ok;
         },
         () => {}
     );
@@ -358,7 +352,7 @@ async function benchMountRows() {
         () => {}
     );
 
-    addRow(`Mount ${N} rows`, tyaffMs, reactMs, vanillaMs, true, true);
+    addRow(`Mount ${N} rows`, tyaffMs, reactMs, vanillaMs, tyaffOk, reactOk);
 }
 
 // ============================================================================
@@ -377,7 +371,7 @@ async function benchUpdate1Row() {
             const c = document.createElement('div');
             arena.appendChild(c);
             const List = Component({ items: [...items], render() {
-                return h('div', null, ...this.items.map(item => h('div', { key: item.id }, item.text)));
+                return h('div', null, this.items.map(item => h('div', { key: item.id }, item.text)));
             }});
             const v = mount(h(List), c);
             await flush();
@@ -439,7 +433,7 @@ async function benchReverse() {
             const c = document.createElement('div');
             arena.appendChild(c);
             const List = Component({ items: [...items], render() {
-                return h('div', null, ...this.items.map(item => h('div', { key: item.id }, item.text)));
+                return h('div', null, this.items.map(item => h('div', { key: item.id }, item.text)));
             }});
             const v = mount(h(List), c);
             await flush();
@@ -501,7 +495,7 @@ async function benchSwapFirstLast() {
             const c = document.createElement('div');
             arena.appendChild(c);
             const List = Component({ items: [...items], render() {
-                return h('div', null, ...this.items.map(item => h('div', { key: item.id }, item.text)));
+                return h('div', null, this.items.map(item => h('div', { key: item.id }, item.text)));
             }});
             const v = mount(h(List), c);
             await flush();
@@ -563,6 +557,7 @@ async function benchSwapFirstLast() {
 async function benchMountComponents() {
     const { N } = getConfig();
 
+    let tyaffOk = false;
     const tyaffMs = await measureAsync(
         () => {},
         () => {
@@ -584,14 +579,14 @@ async function benchMountComponents() {
                 }
             });
             mount(h(List), c);
-            const ok = c.querySelectorAll('.item').length === N;
+            tyaffOk = c.querySelectorAll('.item').length === N;
             c.innerHTML = '';
             arena.removeChild(c);
-            return ok;
         },
         () => {}
     );
 
+    let reactOk = false;
     const reactMs = await measureAsync(
         () => {},
         () => {
@@ -609,15 +604,14 @@ async function benchMountComponents() {
                 return rh('div', null, ...out);
             }
             RflushSync(() => Rrender(rh(List), c));
-            const ok = c.querySelectorAll('.item').length === N;
+            reactOk = c.querySelectorAll('.item').length === N;
             unmountComponentAtNode(c);
             arena.removeChild(c);
-            return ok;
         },
         () => {}
     );
 
-    addRow(`Mount ${N} components`, tyaffMs, reactMs, null, true, true);
+    addRow(`Mount ${N} components`, tyaffMs, reactMs, null, tyaffOk, reactOk);
 }
 
 // ============================================================================
@@ -633,6 +627,7 @@ async function benchDeepTree() {
     let tTree = h('span', null, 'leaf');
     for (let i = 0; i < DEPTH; i++) tTree = h(TyaffW, null, tTree);
 
+    let tyaffOk = false;
     const tyaffMs = await measureAsync(
         () => {},
         () => {
@@ -641,10 +636,9 @@ async function benchDeepTree() {
             mount(tTree, c);
             let d = 0, n = c.firstChild;
             while (n && n.tagName === 'DIV') { d++; n = n.firstChild; }
-            const ok = d === DEPTH && n && n.textContent === 'leaf';
+            tyaffOk = d === DEPTH && n && n.textContent === 'leaf';
             c.innerHTML = '';
             arena.removeChild(c);
-            return ok;
         },
         () => {}
     );
@@ -653,6 +647,7 @@ async function benchDeepTree() {
     let rTree = rh('span', null, 'leaf');
     for (let i = 0; i < DEPTH; i++) rTree = rh(ReactW, null, rTree);
 
+    let reactOk = false;
     const reactMs = await measureAsync(
         () => {},
         () => {
@@ -661,15 +656,14 @@ async function benchDeepTree() {
             RflushSync(() => Rrender(rTree, c));
             let d = 0, n = c.firstChild;
             while (n && n.tagName === 'DIV') { d++; n = n.firstChild; }
-            const ok = d === DEPTH && n && n.textContent === 'leaf';
+            reactOk = d === DEPTH && n && n.textContent === 'leaf';
             unmountComponentAtNode(c);
             arena.removeChild(c);
-            return ok;
         },
         () => {}
     );
 
-    addRow(`Deep tree (${DEPTH} lvl)`, tyaffMs, reactMs, null, true, true);
+    addRow(`Deep tree (${DEPTH} lvl)`, tyaffMs, reactMs, null, tyaffOk, reactOk);
 }
 
 // ============================================================================
@@ -865,7 +859,7 @@ async function benchClearRemount() {
                 show: true,
                 render() {
                     if (!this.show) return h('div', null);
-                    return h('div', null, ...items.map(item => h('div', { key: item.id }, item.text)));
+                    return h('div', null, items.map(item => h('div', { key: item.id }, item.text)));
                 }
             });
             const v = mount(h(List), c);
@@ -929,7 +923,7 @@ async function benchUpdateAllRows() {
             const c = document.createElement('div');
             arena.appendChild(c);
             const List = Component({ items: [...items], render() {
-                return h('div', null, ...this.items.map(item => h('div', { key: item.id }, item.text)));
+                return h('div', null, this.items.map(item => h('div', { key: item.id }, item.text)));
             }});
             const v = mount(h(List), c);
             await flush();
@@ -989,7 +983,7 @@ async function benchInsertMiddle() {
             const c = document.createElement('div');
             arena.appendChild(c);
             const List = Component({ items: [...items], render() {
-                return h('div', null, ...this.items.map(item => h('div', { key: item.id }, item.text)));
+                return h('div', null, this.items.map(item => h('div', { key: item.id }, item.text)));
             }});
             const v = mount(h(List), c);
             await flush();
@@ -1043,6 +1037,153 @@ async function benchInsertMiddle() {
 }
 
 // ============================================================================
+// SCENARIO 11b: INSERT COMPONENT MIDDLE
+// ============================================================================
+// То же что Insert middle, но item — компонент (без memo).
+// Показывает overhead reconcile2Component при вставке в середину.
+
+async function benchInsertCompMiddle() {
+    const { N } = getConfig();
+
+    let tyaffOk = false;
+    const tyaffMs = await measureUpdateOnly(
+        async () => {
+            const items = Array.from({ length: N }, (_, i) => ({ id: i, text: 'item ' + i }));
+            const c = document.createElement('div');
+            arena.appendChild(c);
+            const Item = Component({
+                render(props) { return h('div', { className: 'comp-item' }, props.text); }
+            });
+            const List = Component({ items: [...items], render() {
+                return h('div', null, this.items.map(item => h(Item, { key: item.id, text: item.text })));
+            }});
+            const v = mount(h(List), c);
+            await flush();
+            return { c, inst: v._instance, N };
+        },
+        async (ctx) => {
+            ctx.inst.items.splice(Math.floor(ctx.N / 2), 0, { id: ctx.N, text: 'NEW' });
+            ctx.inst.update();
+            await Promise.resolve();
+        },
+        async (ctx) => {
+            tyaffOk = ctx.c.children[0].children.length === ctx.N + 1 &&
+                       ctx.c.children[0].children[Math.floor(ctx.N / 2)].textContent === 'NEW';
+            mount(null, ctx.c);
+            arena.removeChild(ctx.c);
+        }
+    );
+
+    let reactOk = false;
+    const reactMs = await measureUpdateOnly(
+        async () => {
+            const items = Array.from({ length: N }, (_, i) => ({ id: i, text: 'item ' + i }));
+            const c = document.createElement('div');
+            arena.appendChild(c);
+            function Item({ text }) { return rh('div', { className: 'comp-item' }, text); }
+            let setItems;
+            function List() {
+                const [state, ss] = RuseState([...items]);
+                setItems = ss;
+                return rh('div', null, state.map(item => rh(Item, { key: item.id, text: item.text })));
+            }
+            RflushSync(() => Rrender(rh(List), c));
+            await flush();
+            return { c, setItems, N };
+        },
+        async (ctx) => {
+            RflushSync(() => ctx.setItems(prev => {
+                const a = [...prev];
+                a.splice(Math.floor(ctx.N / 2), 0, { id: ctx.N, text: 'NEW' });
+                return a;
+            }));
+        },
+        async (ctx) => {
+            reactOk = ctx.c.children[0].children.length === ctx.N + 1 &&
+                       ctx.c.children[0].children[Math.floor(ctx.N / 2)].textContent === 'NEW';
+            unmountComponentAtNode(ctx.c);
+            arena.removeChild(ctx.c);
+        }
+    );
+
+    addRow(`Insert comp mid (${N})`, tyaffMs, reactMs, null, tyaffOk, reactOk);
+}
+
+// ============================================================================
+// SCENARIO 11c: INSERT COMPONENT MIDDLE (WITH MEMO)
+// ============================================================================
+// То же что Insert comp middle, но Item обёрнут в memo.
+// Показывает bailout memo при вставке (только 1 новый компонент, остальные skip).
+
+async function benchInsertCompMiddleMemo() {
+    const { N } = getConfig();
+
+    let tyaffOk = false;
+    const tyaffMs = await measureUpdateOnly(
+        async () => {
+            const items = Array.from({ length: N }, (_, i) => ({ id: i, text: 'item ' + i }));
+            const c = document.createElement('div');
+            arena.appendChild(c);
+            const Item = Component({
+                memo(props) { return [props.text]; },
+                render(props) { return h('div', { className: 'memo-comp-item' }, props.text); }
+            });
+            const List = Component({ items: [...items], render() {
+                return h('div', null, this.items.map(item => h(Item, { key: item.id, text: item.text })));
+            }});
+            const v = mount(h(List), c);
+            await flush();
+            return { c, inst: v._instance, N };
+        },
+        async (ctx) => {
+            ctx.inst.items.splice(Math.floor(ctx.N / 2), 0, { id: ctx.N, text: 'NEW' });
+            ctx.inst.update();
+            await Promise.resolve();
+        },
+        async (ctx) => {
+            tyaffOk = ctx.c.children[0].children.length === ctx.N + 1 &&
+                       ctx.c.children[0].children[Math.floor(ctx.N / 2)].textContent === 'NEW';
+            mount(null, ctx.c);
+            arena.removeChild(ctx.c);
+        }
+    );
+
+    let reactOk = false;
+    const reactMs = await measureUpdateOnly(
+        async () => {
+            const items = Array.from({ length: N }, (_, i) => ({ id: i, text: 'item ' + i }));
+            const c = document.createElement('div');
+            arena.appendChild(c);
+            const Item = Rmemo(function Item({ text }) { return rh('div', { className: 'memo-comp-item' }, text); });
+            let setItems;
+            function List() {
+                const [state, ss] = RuseState([...items]);
+                setItems = ss;
+                return rh('div', null, state.map(item => rh(Item, { key: item.id, text: item.text })));
+            }
+            RflushSync(() => Rrender(rh(List), c));
+            await flush();
+            return { c, setItems, N };
+        },
+        async (ctx) => {
+            RflushSync(() => ctx.setItems(prev => {
+                const a = [...prev];
+                a.splice(Math.floor(ctx.N / 2), 0, { id: ctx.N, text: 'NEW' });
+                return a;
+            }));
+        },
+        async (ctx) => {
+            reactOk = ctx.c.children[0].children.length === ctx.N + 1 &&
+                       ctx.c.children[0].children[Math.floor(ctx.N / 2)].textContent === 'NEW';
+            unmountComponentAtNode(ctx.c);
+            arena.removeChild(ctx.c);
+        }
+    );
+
+    addRow(`Insert comp mid memo (${N})`, tyaffMs, reactMs, null, tyaffOk, reactOk);
+}
+
+// ============================================================================
 // SCENARIO 12: MEMO SKIP
 // ============================================================================
 
@@ -1065,7 +1206,7 @@ async function benchMemoSkip() {
                 render() {
                     return h('div', { className: 'parent' },
                         h('span', { className: 'tick' }, 'T:' + this.tick),
-                        ...childData.map(d => h(Child, { key: d.id, text: d.text }))
+                        childData.map(d => h(Child, { key: d.id, text: d.text }))
                     );
                 }
             });
@@ -1140,7 +1281,7 @@ async function benchNoMemo() {
                 render() {
                     return h('div', { className: 'parent' },
                         h('span', { className: 'tick' }, 'T:' + this.tick),
-                        ...childData.map(d => h(Child, { key: d.id, text: d.text }))
+                        childData.map(d => h(Child, { key: d.id, text: d.text }))
                     );
                 }
             });
@@ -1220,7 +1361,7 @@ async function benchMemoHit() {
                 render() {
                     var {items} = this;
                     return h('div', { className: 'parent' },
-                        ...items.map((d, index) =>
+                        items.map((d, index) =>
                             h(Child, { items, index, key: d.id, text: d.text })
                         )
                     );
@@ -1293,6 +1434,8 @@ const scenarios = [
     ['Clear + remount', benchClearRemount],
     ['Update all rows', benchUpdateAllRows],
     ['Insert middle', benchInsertMiddle],
+    ['Insert comp mid', benchInsertCompMiddle],
+    ['Insert comp mid memo', benchInsertCompMiddleMemo],
     ['Memo skip', benchMemoSkip],
     ['No memo (baseline)', benchNoMemo],
     ['Memo hit (1 changed)', benchMemoHit],

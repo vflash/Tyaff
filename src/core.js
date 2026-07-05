@@ -7,8 +7,18 @@ const Portal = Symbol('Portal');
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const XLINK_NS = 'http://www.w3.org/1999/xlink';
 const HTML_NS = 'http://www.w3.org/1999/xhtml';
+const TEXT_VNODE = Symbol('Text');
 
-// ⚡ Dev/Production флаг
+// Шара для пустых результатов reconcile2 — caller'ы только читают, не мутируют.
+const EMPTY = [];
+
+// Заглушка для actualUIDs когда duplicate detection не нужен (первый mount / oldVdom null).
+// has() всегда false — duplicate keys не детектятся (warn только в dev, на первом render допустимо пропустить).
+const NO_ACTUAL_UIDS = {
+    add() { return this; },
+    has() { return false; }
+};
+
 let IS_DEV = typeof process !== 'undefined' && process.env.NODE_ENV !== 'production';
 
 function setDevMode(isDev) {
@@ -19,13 +29,11 @@ function setDevMode(isDev) {
 // Utility functions
 // ============================================================================
 
-// ⚡ Оптимизация: String(key) → "" + key
 function escapeKey(key) {
     const str = "" + key;
     return str.indexOf(',') !== -1 ? str.replace(/,/g, ',,') : str;
 }
 
-// ⚡ Оптимизация: Array.push() → прямое присваивание по индексу
 function pushAll(target, source) {
     if (source == null) return;
     let len = target.length;
@@ -36,8 +44,6 @@ function pushAll(target, source) {
     }
 }
 
-// ⚡ appendChild вместо prepend — проще и быстрее (замеры показали)
-// Чанки не нужны: appendChild в цикле не имеет лимита аргументов
 function appendAll(parent, nodes) {
     if (!nodes) return;
     for (let i = 0; i < nodes.length; i++) {
@@ -45,7 +51,6 @@ function appendAll(parent, nodes) {
     }
 }
 
-// ⚡ Оптимизация: Array.push() → прямое присваивание по индексу
 function collectDOMNodes(childs) {
     const result = [];
     let len = 0;
@@ -62,9 +67,9 @@ function collectDOMNodes(childs) {
         }
         if (node._instance) {
             const inst = node._instance;
-            if (inst._anchor && inst._anchor.nodeType) result[len++] = inst._anchor;
-            if (!inst._isPortal && Array.isArray(inst._nodes)) {
-                for (let i = 0; i < inst._nodes.length; i++) walk(inst._nodes[i]);
+            if (inst[_ANCHOR] && inst[_ANCHOR].nodeType) result[len++] = inst[_ANCHOR];
+            if (!inst[_IS_PORTAL] && Array.isArray(inst[_NODES])) {
+                for (let i = 0; i < inst[_NODES].length; i++) walk(inst[_NODES][i]);
             }
             return;
         }
@@ -84,21 +89,19 @@ function collectDOMNodes(childs) {
 // h() — создание VDOM узлов
 // ============================================================================
 
-// ⚡ Оптимизация: Array.push() → прямое присваивание, String(c) → "" + c
 function h(type, props, ...children) {
-    const normalized = [];
-    let len = 0;
+    // Мутируем children in-place — это свежий массив из rest params, никто больше на него не ссылается.
+    // Не создаём normalized — экономим аллокацию массива.
     for (let i = 0; i < children.length; i++) {
         const c = children[i];
-        if (c == null || c === false || c === true) {
-            normalized[len++] = null;
+        if (c === false || c === true) {
+            children[i] = null;
         } else if (typeof c === 'string' || typeof c === 'number') {
-            normalized[len++] = { _text: "" + c };
-        } else {
-            normalized[len++] = c;
+            children[i] = { tag: TEXT_VNODE, _text: "" + c };
         }
+        // else: vnode — уже на месте, не трогаем
     }
-    return { tag: type, props: props || {}, childs: normalized };
+    return { tag: type, props: props || false, childs: children };
 }
 
 function createPortal(children, containerGetter) {
@@ -110,13 +113,39 @@ function createPortal(children, containerGetter) {
 // Component factory
 // ============================================================================
 
+// Symbol константы для внутренних полей instance.
+// Спрятаны от for-in / Object.keys / JSON.stringify — чистый public API.
+// Защищают от коллизий с пользовательскими полями в definition.
+const _DEF = Symbol('def');
+const _PARENT_CTX = Symbol('parentCtx');
+const _INCOMING_PROPS = Symbol('incomingProps');
+const _VDOM = Symbol('vdom');
+const _NODES = Symbol('nodes');
+const _PREV_MEMO = Symbol('prevMemo');
+const _KEY_MAP = Symbol('keyMap');
+const _REF_COLLECTORS = Symbol('refCollectors');
+const _UPDATE_RESOLVERS = Symbol('updateResolvers');
+const _IS_MOUNTED = Symbol('isMounted');
+const _IS_UPDATING = Symbol('isUpdating');
+const _IS_RENDERING = Symbol('isRendering');
+const _IS_INITIALIZING = Symbol('isInitializing');
+const _IN_CONTEXT_CALL = Symbol('inContextCall');
+const _NAMESPACE = Symbol('namespace');
+const _HAS_CHILD_COMPS = Symbol('hasChildComps');
+const _RERENDER = Symbol('rerender');
+const _SCHEDULE_UPDATE = Symbol('scheduleUpdate');
+// Portal-specific
+const _IS_PORTAL = Symbol('isPortal');
+const _RENDERED = Symbol('rendered');
+const _ANCHOR = Symbol('anchor');
+const _CONTAINER = Symbol('container');
+
 const RESERVED = new Set(['init','render','props','memo','onMounted','onUpdated','onUnmounted','context']);
 
 function Component(definition) {
     function ComponentClass() {
         for (const key in definition) {
-            if (RESERVED.has(key)) continue; // O(1)
-
+            if (RESERVED.has(key)) continue;
             const val = definition[key];
             if (typeof val === 'function') {
                 this[key] = val.bind(this);
@@ -124,24 +153,23 @@ function Component(definition) {
                 this[key] = val;
             }
         }
-
-        this._definition = definition;
-        this._parentContext = null;
-        this._incomingProps = null;
+        this[_DEF] = definition;
+        this[_PARENT_CTX] = null;
+        this[_INCOMING_PROPS] = null;
         this.props = {};
-        this._vdom = null;
-        this._nodes = [];
-        this._parentDOM = null;
-        this._prevMemo = null;
-        this._keyMap = new Map();
-        this._refCollectors = {};
-        this._updateResolvers = null;
-        this._isMounted = false;
-        this._isUpdating = false;
-        this._isRendering = false;
-        this._isInitializing = false;
-        this._inContextCall = false;
-        this._namespace = HTML_NS;
+        this[_VDOM] = null;
+        this[_NODES] = [];
+        this[_PREV_MEMO] = null;
+        this[_KEY_MAP] = new Map();
+        this[_REF_COLLECTORS] = {};
+        this[_UPDATE_RESOLVERS] = null;
+        this[_IS_MOUNTED] = false;
+        this[_IS_UPDATING] = false;
+        this[_IS_RENDERING] = false;
+        this[_IS_INITIALIZING] = false;
+        this[_IN_CONTEXT_CALL] = false;
+        this[_NAMESPACE] = HTML_NS;
+        this[_HAS_CHILD_COMPS] = false;
     }
     ComponentClass._definition = definition;
     return ComponentClass;
@@ -156,7 +184,6 @@ let isBatchScheduled = false;
 let isFlushing = false;
 let nestedUpdateCount = 0;
 const NESTED_UPDATE_LIMIT = 50;
-
 let refreshResolvers = [];
 
 function scheduleUpdate(inst) {
@@ -173,64 +200,39 @@ function flushRefreshResolvers() {
     const resolvers = refreshResolvers;
     refreshResolvers = [];
     for (const finish of resolvers) {
-        try {
-            finish();
-        } catch (err) {
-            console.error('Error in refresh resolver:', err);
-        }
+        try { finish(); } catch (err) { console.error('Error in refresh resolver:', err); }
     }
 }
 
-// ⚡ Оптимизация: Array.from(set) → ручной цикл
 function flushBatch() {
     isFlushing = true;
     try {
         nestedUpdateCount++;
         if (nestedUpdateCount > NESTED_UPDATE_LIMIT) {
-            console.error(
-                '❌ Maximum update depth exceeded (' + NESTED_UPDATE_LIMIT + ').\n' +
-                'This happens when a component repeatedly calls update() ' +
-                'inside onUpdated() or another lifecycle method.'
-            );
+            console.error('❌ Maximum update depth exceeded (' + NESTED_UPDATE_LIMIT + ').');
             batchQueue.clear();
             isBatchScheduled = false;
             flushRefreshResolvers();
             return;
         }
-
-        // Ручной цикл вместо Array.from(batchQueue)
         const toUpdate = [];
         let len = 0;
-        for (const inst of batchQueue) {
-            toUpdate[len++] = inst;
-        }
+        for (const inst of batchQueue) { toUpdate[len++] = inst; }
         batchQueue.clear();
         isBatchScheduled = false;
-
         for (const inst of toUpdate) {
-            // ⚡ В production убираем try/catch для скорости
             if (IS_DEV) {
-                try {
-                    inst._rerender();
-                } catch (err) {
-                    const name = inst._definition && inst._definition.name
-                        ? inst._definition.name : 'Component';
+                try { inst[_RERENDER](); } catch (err) {
+                    const name = inst[_DEF]?.name || 'Component';
                     console.error('❌ Error in component "' + name + '":\n', err);
                 }
-            } else {
-                inst._rerender();
-            }
+            } else { inst[_RERENDER](); }
         }
-
         if (batchQueue.size > 0 && !isBatchScheduled) {
             isBatchScheduled = true;
             Promise.resolve().then(flushBatch);
-        } else if (batchQueue.size === 0) {
-            flushRefreshResolvers();
-        }
-    } finally {
-        isFlushing = false;
-    }
+        } else if (batchQueue.size === 0) { flushRefreshResolvers(); }
+    } finally { isFlushing = false; }
 }
 
 // ============================================================================
@@ -238,38 +240,26 @@ function flushBatch() {
 // ============================================================================
 
 function attachInstanceAPI(inst) {
-    const def = inst._definition;
-
-    inst._rerender = function() {
-        if (this._isUpdating) return;
-        this._isUpdating = true;
-
-        try {
-            _doRerender(this);
-        } catch (err) {
+    inst[_RERENDER] = function() {
+        if (inst[_IS_UPDATING]) return;
+        inst[_IS_UPDATING] = true;
+        try { doRerender(); } catch (err) {
             if (IS_DEV) {
-                const name = this._definition?.name || 'Component';
+                const name = inst[_DEF]?.name || 'Component';
                 console.error('❌ Error in component "' + name + '":', err);
-            } else {
-                throw err; // В prod пробрасываем ошибку дальше
-            }
-        } finally {
-            this._isUpdating = false;
-        }
+            } else { throw err; }
+        } finally { inst[_IS_UPDATING] = false; }
     };
 
-    function _doRerender(inst) {
-        const d = inst._definition;
-        if (d.props) {
-            inst.props = d.props.call(inst, inst._incomingProps);
-        } else {
-            inst.props = inst._incomingProps || {};
-        }
+    function doRerender() {
+        const d = inst[_DEF];
+        if (d.props) { inst.props = d.props.call(inst, inst[_INCOMING_PROPS]); }
+        else { inst.props = inst[_INCOMING_PROPS] || {}; }
 
         let shouldRender = true;
         if (d.memo) {
             const newDeps = d.memo.call(inst, inst.props);
-            const prevMemo = inst._prevMemo;
+            const prevMemo = inst[_PREV_MEMO];
             if (prevMemo && newDeps.length === prevMemo.length) {
                 let same = true;
                 for (let i = 0; i < newDeps.length; i++) {
@@ -277,158 +267,146 @@ function attachInstanceAPI(inst) {
                 }
                 if (same) shouldRender = false;
             }
-            inst._prevMemo = newDeps;
+            inst[_PREV_MEMO] = newDeps;
         }
 
-        const oldVdom = inst._vdom;
+        const oldVdom = inst[_VDOM];
         let newNodes;
 
         if (shouldRender) {
             let newVdom;
-            inst._keyMap.clear();
-            if (oldVdom) populateKeyMap(oldVdom, '', inst._keyMap);
-            inst._isRendering = true;
-            try {
-                newVdom = d.render.call(inst, inst.props);
-            } finally {
-                inst._isRendering = false;
+            // keyMap — персистентный Map на instance. После прошлого rerender + cleanup
+            // содержит актуальную карту текущего дерева. populateKeyMap НЕ нужен —
+            // reconcile2 сам заполняет keyMap.set'ом, cleanup удаляет неиспользуемые.
+            const keyMap = inst[_KEY_MAP];
+            inst[_IS_RENDERING] = true;
+            try { newVdom = d.render.call(inst, inst.props); } finally { inst[_IS_RENDERING] = false; }
+
+            // actualUIDs нужен для duplicate detection и cleanup.
+            // На первом render (oldVdom null) — cleanup не нужен (keyMap пустой).
+            // В dev используем настоящий Set (для duplicate warning), в prod — заглушку.
+            const actualUIDs = oldVdom ? new Set() : (IS_DEV ? new Set() : NO_ACTUAL_UIDS);
+            const oldNodes = inst[_NODES];
+            // Сбрасываем флаг дочерних компонентов перед reconcile2.
+            // Если render выполняется — reconcile2 заполнит его заново.
+            // Если render заблокирован (memo-skip) — флаг остаётся с прошлого render.
+            inst[_HAS_CHILD_COMPS] = false;
+            // Свой mountedQueue для этого rerender. Сохраняем родительский (если есть),
+            // чтобы вложенные rerender'ы (через reconcile2Component) не ломали очередь.
+            const prevQueue = mountedQueue;
+            mountedQueue = [];
+
+            const flat = [];
+            reconcile2(newVdom, keyMap, actualUIDs, '', inst[_NAMESPACE], inst, flat);
+
+            // Cleanup — unmount и удаление из keyMap того, чего нет в новом дереве.
+            // Нужен только если есть старое дерево (oldVdom). На первом render или после
+            // render→null — keyMap пустой, чистить нечего.
+            // После cleanup keyMap содержит только элементы нового дерева (= старое для следующего rerender).
+            if (oldVdom) {
+                for (const [key, oldElement] of keyMap) {
+                    if (!actualUIDs.has(key)) {
+                        unmountVdom(oldElement);
+                        keyMap.delete(key);
+                    }
+                }
             }
-            checkDuplicateKeys(newVdom, '');
-            const oldNodes = inst._nodes;
-            const wasFirstRender = !oldVdom;
-            newNodes = reconcile(
-                oldVdom, newVdom, inst._parentDOM, inst, '',
-                inst._keyMap, inst._namespace
-            );
-            const flat = Array.isArray(newNodes) ? newNodes : (newNodes ? [newNodes] : []);
-            if (!wasFirstRender && inst._parentDOM) {
-                syncDOMChildren(inst._parentDOM, oldNodes, flat);
-            }
-            inst._nodes = flat;
-            inst._vdom = newVdom;
-            if (!wasFirstRender && d.onUpdated) {
+
+            // syncDOMChildren для inst[_NODES] делает родитель (reconcile2HTML или mount)
+            inst[_NODES] = flat;
+            inst[_VDOM] = newVdom;
+
+            // onMounted для новых компонентов, созданных во время этого rerender.
+            triggerMounted();
+            mountedQueue = prevQueue;
+
+            // onUpdated — только при update (не при первом mount).
+            // _isMounted ставится в triggerMounted после первого render.
+            // Важно: oldVdom не подходит как индикатор — если прошлый render вернул null,
+            // oldVdom будет null, но это update, и onUpdated должен вызваться.
+            if (inst[_IS_MOUNTED] && d.onUpdated) {
                 d.onUpdated.call(inst);
             }
         } else {
-            // ⚡ memo-skip: целевой обход дочерних компонентов и порталов
-            // Пропускаем: render(), checkDuplicateKeys, populateKeyMap, keyMap.clear()
-            // Пропускаем: reconcile для HTML/Fragment/текст (props не изменились — vnode тот же)
-            // Дети-компоненты получают _rerender → props() → memo() → возможно render()
-            // onUpdated НЕ вызывается (memo заблокировал render)
-            // inst._vdom остаётся oldVdom (не изменился)
-            inst._isRendering = true;
-            try {
-                newNodes = refreshMemoSubtree(
-                    oldVdom, inst._parentDOM, inst, inst._namespace
-                );
-            } finally {
-                inst._isRendering = false;
-            }
-            const flat = Array.isArray(newNodes) ? newNodes : (newNodes ? [newNodes] : []);
-            if (inst._parentDOM) {
-                syncDOMChildren(inst._parentDOM, inst._nodes, flat);
-            }
-            inst._nodes = flat;
-        }
-
-        const resolvers = inst._updateResolvers;
-        inst._updateResolvers = null;
-        if (resolvers) {
-            // ✅ ИСПРАВЛЕНИЕ БАГА: resolversi → resolvers[i](shouldRender)
-            for (let i = 0; i < resolvers.length; i++) {
-                resolvers[i](shouldRender);
+            // Memo-skip: render заблокирован. Если в поддереве нет дочерних компонентов
+            // (только HTML/text) — пропускаем refreshMemoSubtree, узлы не изменились.
+            if (inst[_HAS_CHILD_COMPS]) {
+                const flat = [];
+                refreshMemoSubtree(oldVdom, inst, inst[_NAMESPACE], flat);
+                inst[_NODES] = flat;
             }
         }
-    };
 
-    // ⚡ Оптимизация: Object.keys() → for...in, Object.assign() → ручной цикл
+        const resolvers = inst[_UPDATE_RESOLVERS];
+        inst[_UPDATE_RESOLVERS] = null;
+        if (resolvers) { for (let i = 0; i < resolvers.length; i++) { resolvers[i](shouldRender); } }
+    }
+
     inst.update = function(patch) {
-        if (this._isRendering) {
-            console.error(
-                '❌ Cannot call update() inside render().\n' +
-                'Use direct assignment instead: this.value = 22;'
-            );
+        if (inst[_IS_RENDERING]) {
+            console.error('❌ Cannot call update() inside render().');
             return Promise.resolve(false);
         }
-
         if (patch && typeof patch === 'object') {
-            // ⚡ Проверка на пустой объект через for...in вместо Object.keys()
             let hasKeys = false;
-            for (const k in patch) {
-                hasKeys = true;
-                break;
-            }
-
+            for (const k in patch) { hasKeys = true; break; }
             if (!hasKeys) {
-                if (this._isInitializing) return Promise.resolve(false);
-                return this._scheduleUpdate();
+                if (inst[_IS_INITIALIZING]) return Promise.resolve(false);
+                return inst[_SCHEDULE_UPDATE]();
             }
-
             let changed = false;
-            for (const k in patch) {
-                if (this[k] !== patch[k]) { changed = true; break; }
-            }
+            for (const k in patch) { if (inst[k] !== patch[k]) { changed = true; break; } }
             if (!changed) return Promise.resolve(false);
-
-            // ⚡ Object.assign(this, patch) → ручной цикл
-            for (const k in patch) {
-                this[k] = patch[k];
-            }
+            for (const k in patch) { inst[k] = patch[k]; }
         }
-        if (this._isInitializing) return Promise.resolve(false);
-        return this._scheduleUpdate();
+        if (inst[_IS_INITIALIZING]) return Promise.resolve(false);
+        return inst[_SCHEDULE_UPDATE]();
     };
 
-    inst._scheduleUpdate = function() {
+    inst[_SCHEDULE_UPDATE] = function() {
         return new Promise(resolve => {
-            if (!this._updateResolvers) this._updateResolvers = [];
-            this._updateResolvers.push(resolve);
-            scheduleUpdate(this);
+            if (!inst[_UPDATE_RESOLVERS]) inst[_UPDATE_RESOLVERS] = [];
+            inst[_UPDATE_RESOLVERS].push(resolve);
+            scheduleUpdate(inst);
         });
     };
 
-    inst._refCollectors = {};
+    inst[_REF_COLLECTORS] = {};
     inst.refs = function(name) {
-        if (!inst._refCollectors[name]) {
-            inst._refCollectors[name] = (node) => {
-                inst.refs[name] = node;
-            };
+        if (!inst[_REF_COLLECTORS][name]) {
+            inst[_REF_COLLECTORS][name] = (node) => { inst.refs[name] = node; };
         }
-        return inst._refCollectors[name];
+        return inst[_REF_COLLECTORS][name];
     };
 
     inst.context = function(key, ...args) {
-        let p = this._parentContext;
+        let p = inst[_PARENT_CTX];
         while (p) {
-            const ctx = p._definition.context;
-            if (ctx && typeof ctx[key] === 'function') {
-                return ctx[key].apply(p, args);
-            }
-            p = p._parentContext;
+            const ctx = p[_DEF].context;
+            if (ctx && typeof ctx[key] === 'function') { return ctx[key].apply(p, args); }
+            p = p[_PARENT_CTX];
         }
         return undefined;
     };
 
     inst.contextSelf = function(key, ...args) {
-        if (this._inContextCall) throw new Error('contextSelf recursion');
-        const ctx = this._definition.context;
+        if (inst[_IN_CONTEXT_CALL]) throw new Error('contextSelf recursion');
+        const ctx = inst[_DEF].context;
         if (ctx && typeof ctx[key] === 'function') {
-            this._inContextCall = true;
+            inst[_IN_CONTEXT_CALL] = true;
             try {
-                const res = ctx[key].apply(this, args);
+                const res = ctx[key].apply(inst, args);
                 if (res !== undefined) return res;
-            } finally {
-                this._inContextCall = false;
-            }
+            } finally { inst[_IN_CONTEXT_CALL] = false; }
         }
-        return this.context(key, ...args);
+        return inst.context(key, ...args);
     };
 }
+
 // ============================================================================
 // Keys
 // ============================================================================
 
-// ⚡ Оптимизация: String(key) → "" + key
 function makeMapKey(vnode, path) {
     const key = vnode?.props?.key;
     if (key !== undefined) {
@@ -438,169 +416,34 @@ function makeMapKey(vnode, path) {
     return path;
 }
 
-/**
- * Проверяет дубликаты user keys в vnode (вызывается на newVdom).
- * Использует свой временный Map, не влияет на keyMap для reconcile.
- */
-function checkDuplicateKeys(vnode, path, seen) {
-    if (!IS_DEV) return;  // ⚡ Быстрый выход в production
-    if (!seen) seen = new Map();
-    if (vnode == null) return;
-    if (Array.isArray(vnode)) {
-        for (let i = 0; i < vnode.length; i++) {
-            checkDuplicateKeys(vnode[i], path + ',' + i, seen);
-        }
-        return;
-    }
-    if (vnode._text !== undefined) return;
-
-    if (vnode.tag === Fragment) {
-        const hasKey = vnode.props && vnode.props.key !== undefined;
-        if (hasKey) {
-            const key = '#' + escapeKey(vnode.props.key);
-            if (seen.has(key)) {
-                console.warn(`⚠️ Warning: Duplicate key "${vnode.props.key}" detected in Fragment. Keys must be unique within a single render call.`);
-            } else {
-                seen.set(key, true);
-            }
-        }
-        const basePath = hasKey ? '' : path;
-        if (vnode.childs) {
-            for (let i = 0; i < vnode.childs.length; i++) {
-                checkDuplicateKeys(vnode.childs[i], basePath + ',' + i, seen);
-            }
-        }
-        return;
-    }
-
-    const hasKey = vnode.props && vnode.props.key !== undefined;
-    if (hasKey) {
-        const key = '#' + escapeKey(vnode.props.key);
-        if (seen.has(key)) {
-            console.warn(`⚠️ Warning: Duplicate key "${vnode.props.key}" detected. Keys must be unique within a single render call.`);
-        } else {
-            seen.set(key, true);
-        }
-    }
-
-    if (vnode.childs) {
-        for (let i = 0; i < vnode.childs.length; i++) {
-            checkDuplicateKeys(vnode.childs[i], path + ',' + i, seen);
-        }
-    }
-}
-
-/**
- * Заполняет keyMap из старого vnode для последующего reconcile.
- * Используется только для oldVdom.
- */
-function populateKeyMap(vnode, path, keyMap) {
-    if (vnode == null) return;
-    if (Array.isArray(vnode)) {
-        for (let i = 0; i < vnode.length; i++) {
-            populateKeyMap(vnode[i], path + ',' + i, keyMap);
-        }
-        return;
-    }
-    if (vnode._text !== undefined) return;
-
-    if (vnode.tag === Fragment) {
-        const hasKey = vnode.props && vnode.props.key !== undefined;
-
-        if (hasKey && vnode._instance) {
-            const key = makeMapKey(vnode, path);
-            keyMap.set(key, vnode._instance);
-        }
-
-        const basePath = hasKey ? '' : path;
-        if (vnode.childs) {
-            for (let i = 0; i < vnode.childs.length; i++) {
-                populateKeyMap(vnode.childs[i], basePath + ',' + i, keyMap);
-            }
-        }
-        return;
-    }
-
-    if (vnode._instance) {
-        const key = makeMapKey(vnode, path);
-        keyMap.set(key, vnode._instance);
-    }
-
-    if (vnode.childs) {
-        for (let i = 0; i < vnode.childs.length; i++) {
-            populateKeyMap(vnode.childs[i], path + ',' + i, keyMap);
-        }
-    }
-}
-
 // ============================================================================
 // Props
 // ============================================================================
 
 const RECREATE_ATTRS = ['type', 'is'];
-const CAMEL_TO_ATTR = {
-    className: 'class',
-    htmlFor: 'for',
-    tabIndex: 'tabindex'
-};
+const CAMEL_TO_ATTR = { className: 'class', htmlFor: 'for', tabIndex: 'tabindex' };
 
-// ⚡ Оптимизация: вынесенный switch для HTML свойств (только установка)
 function setHTMLProp(dom, key, value) {
     const strVal = value === true ? '' : "" + value;
-
     switch (key) {
-        case 'class':
-        case 'className':
-            dom.className = strVal;
-            return true;
-        case 'id':
-            dom.id = strVal;
-            return true;
-        case 'title':
-            dom.title = strVal;
-            return true;
-        case 'src':
-            dom.src = strVal;
-            return true;
-        case 'href':
-            dom.href = strVal;
-            return true;
-        case 'alt':
-            dom.alt = strVal;
-            return true;
-        case 'name':
-            dom.name = strVal;
-            return true;
-        case 'placeholder':
-            dom.placeholder = strVal;
-            return true;
-        case 'disabled':
-            dom.disabled = !!value;
-            return true;
-        case 'readOnly':
-        case 'readonly':
-            dom.readOnly = !!value;
-            return true;
-        case 'hidden':
-            dom.hidden = !!value;
-            return true;
-        case 'tabIndex':
-        case 'tabindex':
-            dom.tabIndex = +value;
-            return true;
-        case 'draggable':
-            dom.draggable = !!value;
-            return true;
-        case 'contentEditable':
-        case 'contenteditable':
-            dom.contentEditable = value;
-            return true;
-        default:
-            return false;
+        case 'class': case 'className': dom.className = strVal; return true;
+        case 'id': dom.id = strVal; return true;
+        case 'title': dom.title = strVal; return true;
+        case 'src': dom.src = strVal; return true;
+        case 'href': dom.href = strVal; return true;
+        case 'alt': dom.alt = strVal; return true;
+        case 'name': dom.name = strVal; return true;
+        case 'placeholder': dom.placeholder = strVal; return true;
+        case 'disabled': dom.disabled = !!value; return true;
+        case 'readOnly': case 'readonly': dom.readOnly = !!value; return true;
+        case 'hidden': dom.hidden = !!value; return true;
+        case 'tabIndex': case 'tabindex': dom.tabIndex = +value; return true;
+        case 'draggable': dom.draggable = !!value; return true;
+        case 'contentEditable': case 'contenteditable': dom.contentEditable = value; return true;
+        default: return false;
     }
 }
 
-// ⚡ Оптимизация: String(value) → "" + value, прямое присваивание свойств
 function applyProp(dom, key, value, namespace) {
     if (key === 'key' || key === 'ref' || key === 'children') return;
     const isSVG = namespace === SVG_NS;
@@ -624,21 +467,18 @@ function applyProp(dom, key, value, namespace) {
             }
             if (key === 'checked') {
                 dom.checked = !!value;
-                if (value) dom.setAttribute('checked', '');
-                else dom.removeAttribute('checked');
+                if (value) dom.setAttribute('checked', ''); else dom.removeAttribute('checked');
                 return;
             }
             if (tag === 'SELECT' && key === 'multiple') {
                 dom.multiple = !!value;
-                if (value) dom.setAttribute('multiple', '');
-                else dom.removeAttribute('multiple');
+                if (value) dom.setAttribute('multiple', ''); else dom.removeAttribute('multiple');
                 return;
             }
         }
         if (tag === 'OPTION' && key === 'selected') {
             dom.selected = !!value;
-            if (value) dom.setAttribute('selected', '');
-            else dom.removeAttribute('selected');
+            if (value) dom.setAttribute('selected', ''); else dom.removeAttribute('selected');
             return;
         }
     }
@@ -648,12 +488,8 @@ function applyProp(dom, key, value, namespace) {
         const store = dom._evtStore || (dom._evtStore = {});
         const oldHandler = store[eventType];
         if (oldHandler) dom.removeEventListener(eventType, oldHandler);
-        if (typeof value === 'function') {
-            dom.addEventListener(eventType, value);
-            store[eventType] = value;
-        } else {
-            delete store[eventType];
-        }
+        if (typeof value === 'function') { dom.addEventListener(eventType, value); store[eventType] = value; }
+        else { delete store[eventType]; }
         return;
     }
 
@@ -662,33 +498,24 @@ function applyProp(dom, key, value, namespace) {
         return;
     }
 
-    // ⚡ Оптимизация: style → style.cssText (быстрее чем setAttribute)
     if (key === 'style') {
-        if (value == null) {
-            dom.style.cssText = '';
-        } else if (typeof value === 'object') {
+        if (value == null) { dom.style.cssText = ''; }
+        else if (typeof value === 'object') {
             let css = '';
             for (const p in value) {
                 const cssProp = p.replace(/[A-Z]/g, m => '-' + m.toLowerCase());
                 css += cssProp + ':' + value[p] + ';';
             }
             dom.style.cssText = css;
-        } else {
-            dom.style.cssText = "" + value;
-        }
+        } else { dom.style.cssText = "" + value; }
         return;
     }
 
-    // ⚡ Оптимизация: удаление атрибутов
     if (value === false || value == null) {
         if (isSVG) {
-            if (key === 'xlinkHref') {
-                dom.removeAttributeNS(XLINK_NS, 'href');
-            } else {
-                dom.removeAttribute(key);
-            }
+            if (key === 'xlinkHref') { dom.removeAttributeNS(XLINK_NS, 'href'); }
+            else { dom.removeAttribute(key); }
         } else {
-            // ⚡ Для всех случаев — удаляем атрибут полностью
             const attr = CAMEL_TO_ATTR[key] || key.toLowerCase();
             dom.removeAttribute(attr);
         }
@@ -696,41 +523,28 @@ function applyProp(dom, key, value, namespace) {
     }
 
     if (isSVG) {
-        if (key === 'xlinkHref') {
-            dom.setAttributeNS(XLINK_NS, 'xlink:href', value);
-        } else {
-            dom.setAttribute(key, value === true ? '' : "" + value);
-        }
+        if (key === 'xlinkHref') { dom.setAttributeNS(XLINK_NS, 'xlink:href', value); }
+        else { dom.setAttribute(key, value === true ? '' : "" + value); }
         return;
     }
 
-    // ⚡ Оптимизация: прямое присваивание DOM-свойств через вынесенную функцию
     if (!setHTMLProp(dom, key, value)) {
         const attr = CAMEL_TO_ATTR[key] || key.toLowerCase();
         dom.setAttribute(attr, value === true ? '' : "" + value);
     }
 }
 
-// ⚡ Fast-path для mount: применяет все props напрямую без сравнения
-// Используется в mountHTML где oldProps = {} (всё новое)
-// ВНИМАНИЕ: для SELECT value НЕ применяется здесь — options ещё не смонтированы.
-// Value для select применяется в конце mountHTML после mount children.
 function applyPropsDirect(dom, props, namespace) {
     if (!props) return;
     const isSVG = namespace === SVG_NS;
     const tag = dom.tagName;
-    const isFormElement = !isSVG && (
-        tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
-    );
+    const isFormElement = !isSVG && (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT');
     const isSelect = tag === 'SELECT';
     for (const k in props) {
         if (k === 'key' || k === 'ref' || k === 'children') continue;
-        // Skip value для form elements — применяется отдельно в конце
         if (isFormElement && (k === 'value' || k === 'checked')) continue;
         applyProp(dom, k, props[k], namespace);
     }
-    // value/checked для INPUT/TEXTAREA — можно применять сразу (options не нужны)
-    // Для SELECT — НЕ применяем здесь, mountHTML применит после children
     if (isFormElement && !isSelect) {
         if ('value' in props) applyProp(dom, 'value', props.value, namespace);
         if ('checked' in props) applyProp(dom, 'checked', props.checked, namespace);
@@ -740,42 +554,31 @@ function applyPropsDirect(dom, props, namespace) {
 function applyProps(dom, oldProps, newProps, namespace) {
     oldProps = oldProps || {};
     newProps = newProps || {};
-
-    for (const k in oldProps) {
-        if (!(k in newProps)) applyProp(dom, k, null, namespace);
-    }
-
     const isSVG = namespace === SVG_NS;
-    const tag = dom.tagName;  // ⚡ Кэшируем один раз
-    const isFormElement = !isSVG && (
-        tag === 'INPUT' ||
-        tag === 'TEXTAREA' ||
-        tag === 'SELECT'
-    );
+    const tag = dom.tagName;
+    const isFormElement = !isSVG && (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT');
 
-    if (isFormElement && tag === 'SELECT' && 'multiple' in newProps) {
-        if (oldProps.multiple !== newProps.multiple) {
-            dom.multiple = !!newProps.multiple;
-            if (newProps.multiple) dom.setAttribute('multiple', '');
-            else dom.removeAttribute('multiple');
+    // Удаляем атрибуты, которых нет в новых props.
+    // SELECT value не удаляем — оно применяется отдельно в reconcile2HTML после syncDOMChildren.
+    for (const k in oldProps) {
+        if (!(k in newProps)) {
+            if (tag === 'SELECT' && k === 'value') continue;
+            applyProp(dom, k, null, namespace);
         }
     }
 
+    // Применяем изменённые атрибуты (value/checked для form-элементов — отдельно ниже)
     for (const k in newProps) {
         if (isFormElement && (k === 'value' || k === 'checked')) continue;
-        if (k === 'multiple' && tag === 'SELECT') continue;
-        if (oldProps[k] !== newProps[k]) {
-            applyProp(dom, k, newProps[k], namespace);
-        }
+        if (oldProps[k] !== newProps[k]) { applyProp(dom, k, newProps[k], namespace); }
     }
 
-    if (isFormElement) {
-        if ('value' in newProps && oldProps.value !== newProps.value) {
-            applyProp(dom, 'value', newProps.value, namespace);
-        }
-        if ('checked' in newProps && oldProps.checked !== newProps.checked) {
-            applyProp(dom, 'checked', newProps.checked, namespace);
-        }
+    // value/checked для form-элементов — после остальных атрибутов.
+    // SELECT не трогаем здесь: его value применяется в reconcile2HTML после syncDOMChildren
+    // (нужны options в DOM для установки selected).
+    if (isFormElement && tag !== 'SELECT') {
+        if ('value' in newProps && oldProps.value !== newProps.value) { applyProp(dom, 'value', newProps.value, namespace); }
+        if ('checked' in newProps && oldProps.checked !== newProps.checked) { applyProp(dom, 'checked', newProps.checked, namespace); }
     }
 }
 
@@ -783,143 +586,84 @@ function applyProps(dom, oldProps, newProps, namespace) {
 // Refs
 // ============================================================================
 
-function callRefs(vnode, seen = new WeakSet()) {
-    if (vnode == null) return;
-    if (typeof vnode !== 'object') return;
-    if (seen.has(vnode)) return;
-    seen.add(vnode);
-
-    if (Array.isArray(vnode)) {
-        for (let i = 0; i < vnode.length; i++) callRefs(vnode[i], seen);
-        return;
-    }
-    if (vnode._text !== undefined) return;
-
-    if (vnode.tag === Portal) {
-        const inst = vnode._instance;
-        if (vnode.props && vnode.props.ref && inst) vnode.props.ref(inst);
-        if (inst && inst._rendered) callRefs(inst._rendered, seen);
-        return;
-    }
-    if (typeof vnode.tag === 'function' && vnode.tag._definition) {
-        const inst = vnode._instance;
-        if (vnode.props && vnode.props.ref && inst) vnode.props.ref(inst);
-        if (inst && inst._vdom) callRefs(inst._vdom, seen);
-        return;
-    }
-    if (vnode.props && vnode.props.ref && vnode._el) {
-        vnode.props.ref(vnode._el);
-    }
-    if (vnode.childs) {
-        for (let i = 0; i < vnode.childs.length; i++) callRefs(vnode.childs[i], seen);
-    }
-}
-
 // ============================================================================
 // Lifecycle
 // ============================================================================
 
-// ⚡ Оптимизация: Array.push() → прямое присваивание
-function triggerMounted(roots) {
-    const components = [];
-    const stack = Array.isArray(roots) ? roots.slice() : [roots];
-    const seen = new WeakSet();
-    let compLen = 0;
+// Массив-коллектор для новых компонентов во время reconcile2.
+// Сбрасывается перед reconcile2, вызывается onMounted после (в обратном порядке — children-first).
+let mountedQueue = null;
 
-    while (stack.length) {
-        const vnode = stack.pop();
-        if (vnode == null || typeof vnode !== 'object') continue;
-        if (seen.has(vnode)) continue;
-        seen.add(vnode);
-
-        if (Array.isArray(vnode)) {
-            for (let i = vnode.length - 1; i >= 0; i--) stack.push(vnode[i]);
-            continue;
-        }
-        if (vnode._text !== undefined) continue;
-
-        if (vnode.tag === Portal) {
-            const inst = vnode._instance;
-            if (inst && inst._rendered) stack.push(inst._rendered);
-            continue;
-        }
-        if (typeof vnode.tag === 'function' && vnode.tag._definition) {
-            const inst = vnode._instance;
-            if (inst && !inst._isMounted) {
-                inst._isMounted = true;
-                components[compLen++] = inst;
-            }
-            if (inst && inst._vdom) stack.push(inst._vdom);
-            continue;
-        }
-        if (vnode.childs) {
-            for (let i = vnode.childs.length - 1; i >= 0; i--) {
-                stack.push(vnode.childs[i]);
-            }
-        }
-    }
-
-    for (let i = compLen - 1; i >= 0; i--) {
-        const inst = components[i];
-        const d = inst._definition;
-        try {
-            if (d.onMounted) d.onMounted.call(inst);
-        } catch (err) {
+function triggerMounted() {
+    if (!mountedQueue) return;
+    // Вызываем в обратном порядке — дочерние компоненты добавлены в очередь позже родительского,
+    // но onMounted должны получить раньше (children-first).
+    for (let i = mountedQueue.length - 1; i >= 0; i--) {
+        const inst = mountedQueue[i];
+        const d = inst[_DEF];
+        try { if (d.onMounted) d.onMounted.call(inst); } catch (err) {
             const name = d.name || 'Component';
             console.error('❌ Error in onMounted of "' + name + '":\n', err);
         }
     }
+    mountedQueue = null;
 }
 
 function unmountVdom(vnode, seen) {
     if (vnode == null || typeof vnode !== 'object') return;
-
-    // ⚡ В production пропускаем WeakSet — циклических ссылок нет по архитектуре
     if (IS_DEV) {
         if (!seen) seen = new WeakSet();
         if (seen.has(vnode)) return;
         seen.add(vnode);
     }
-
     if (Array.isArray(vnode)) {
         for (let i = 0; i < vnode.length; i++) unmountVdom(vnode[i], seen);
         return;
     }
-    if (vnode._text !== undefined) return;
+    if (vnode._text !== undefined) {
+        removeDOMNode(vnode._el);
+        return;
+    }
+
+    // ref(null) — общий для всех non-text узлов с ref
+    vnode.props?.ref?.(null);
 
     if (vnode.tag === Portal) {
         const inst = vnode._instance;
         if (inst) {
-            if (vnode.props && vnode.props.ref) vnode.props.ref(null);
-            if (inst._rendered) unmountVdom(inst._rendered, seen);
-            if (inst._anchor && inst._anchor.parentNode) {
-                inst._anchor.parentNode.removeChild(inst._anchor);
-            }
-            if (inst._container) {
-                for (let i = 0; i < inst._nodes.length; i++) {
-                    const n = inst._nodes[i];
-                    if (n && n.parentNode === inst._container) {
-                        inst._container.removeChild(n);
-                    }
+            if (inst[_RENDERED]) unmountVdom(inst[_RENDERED], seen);
+            removeDOMNode(inst[_ANCHOR]);
+            // Узлы портала лежат в inst[_CONTAINER] — удаляем только те, что в нём
+            if (inst[_CONTAINER]) {
+                for (let i = 0; i < inst[_NODES].length; i++) {
+                    const n = inst[_NODES][i];
+                    if (n?.parentNode === inst[_CONTAINER]) inst[_CONTAINER].removeChild(n);
                 }
             }
         }
         return;
     }
     if (typeof vnode.tag === 'function' && vnode.tag._definition) {
+        // Компонент: onUnmounted + удаление DOM-узлов + рекурсивный unmount inst[_VDOM]
         const inst = vnode._instance;
         if (inst) {
-            if (vnode.props && vnode.props.ref) vnode.props.ref(null);
-            const d = inst._definition;
-            if (d && d.onUnmounted) d.onUnmounted.call(inst);
-            if (inst._vdom) unmountVdom(inst._vdom, seen);
+            const d = inst[_DEF];
+            if (d?.onUnmounted) d.onUnmounted.call(inst);
+            if (inst[_NODES]) {
+                for (const node of inst[_NODES]) removeDOMNode(node);
+            }
+            if (inst[_VDOM]) unmountVdom(inst[_VDOM], seen);
         }
         return;
     }
-    if (typeof vnode.tag === 'string') {
-        if (vnode.props && vnode.props.ref && vnode._el) {
-            vnode.props.ref(null);
+    if (vnode.tag === Fragment) {
+        // Fragment: удаляем все DOM-узлы, затем рекурсивно unmount детей
+        if (vnode._nodes) {
+            for (const node of vnode._nodes) removeDOMNode(node);
         }
+    } else if (typeof vnode.tag === 'string') {
+        // HTML: удаляем сам элемент (дети удалятся браузером, но vnode нужно обойти для onUnmounted/ref)
+        removeDOMNode(vnode._el);
     }
     if (vnode.childs) {
         for (let i = 0; i < vnode.childs.length; i++) unmountVdom(vnode.childs[i], seen);
@@ -930,708 +674,499 @@ function unmountVdom(vnode, seen) {
 // DOM sync
 // ============================================================================
 
+// Безопасное удаление DOM-узла из его текущего родителя.
+function removeDOMNode(node) {
+    if (node?.parentNode) node.parentNode.removeChild(node);
+}
+
 function syncDOMChildren(parentDOM, oldNodes, newNodes) {
-    const newLen = newNodes.length;  // ⚡ Кэш длины
-    const oldLen = oldNodes.length;  // ⚡ Кэш длины
-    let oi = 0;
+    const nlen = newNodes.length;
 
-    for (let i = 0; i < newLen; i++) {
+    // Fast path: первый mount — oldNodes пустой.
+    // Просто append'им все узлы по порядку. Это быстрее insertBefore (особенно в реальном браузере).
+    if (oldNodes.length === 0) {
+        for (let i = 0; i < nlen; i++) {
+            parentDOM.appendChild(newNodes[i]);
+        }
+        return;
+    }
+
+    // Быстрая проверка: если массивы идентичны — ничего не делаем
+    if (oldNodes.length === nlen) {
+        let same = true;
+        for (let i = 0; i < nlen; i++) {
+            if (oldNodes[i] !== newNodes[i]) { same = false; break; }
+        }
+        if (same) return;
+    }
+
+    // Выстраиваем newNodes в правильном порядке.
+    // Идём с конца, чтобы не ломать nextSibling.
+    // Старые узлы, которых нет в newNodes, НЕ удаляем здесь — это делает unmountVdom
+    // (т.к. нужно вызвать onUnmounted, ref(null) и т.д.)
+    //
+    // expectedNext всегда в parentDOM на момент проверки: мы идём с конца, и expectedNext
+    // (newNodes[i+1]) уже обработан на предыдущей итерации — либо appendChild'd, либо
+    // insertBefore'd. Поэтому проверку parentNode опускаем.
+    for (let i = nlen - 1; i >= 0; i--) {
         const n = newNodes[i];
-        const o = oi < oldLen ? oldNodes[oi] : null;
-
-        if (n === o) {
-            oi++;
-        } else {
-            let ref = null;
-            for (let j = oi; j < oldLen; j++) {
-                const oldJ = oldNodes[j];  // ⚡ Кэш oldNodes[j]
-                if (oldJ && oldJ.parentNode === parentDOM) {
-                    ref = oldJ;
-                    break;
-                }
+        if (i + 1 < nlen) {
+            const expectedNext = newNodes[i + 1];
+            if (n.nextSibling !== expectedNext) {
+                parentDOM.insertBefore(n, expectedNext);
             }
-            parentDOM.insertBefore(n, ref);
+        } else {
+            parentDOM.appendChild(n);
         }
-    }
-
-    while (oi < oldLen) {
-        const o = oldNodes[oi++];
-        if (o && o.parentNode === parentDOM) parentDOM.removeChild(o);
     }
 }
 
 // ============================================================================
-// Reconcile
+// ============================================================================
+// Reconcile2 — рекурсивный алгоритм с out-параметром
 // ============================================================================
 
-function reconcile(oldNode, newNode, parentDOM, ctx, path, keyMap, namespace) {
-    if (oldNode === newNode) {
-        if (Array.isArray(newNode)) {
-            const nodes = [];
-            for (let i = 0; i < newNode.length; i++) {
-                const child = newNode[i];
-                pushAll(nodes, reconcile(child, child, parentDOM, ctx, path + ',' + i, keyMap, namespace));
-            }
-            return nodes;
-        }
-        if (newNode && (
-            (typeof newNode.tag === 'function' && newNode.tag._definition) ||
-            newNode.tag === Portal
-        )) {
-            // Продолжить ниже
-        } else if (newNode && typeof newNode.tag === 'string') {
-            if (newNode.childs) {
-                for (let i = 0; i < newNode.childs.length; i++) {
-                    const child = newNode.childs[i];
-                    reconcile(child, child, newNode._el, ctx, path + ',' + i, keyMap, namespace);
-                }
-            }
-            return extractNodes(newNode);
-        } else if (newNode && newNode.tag === Fragment) {
-            const hasKey = newNode.props && newNode.props.key !== undefined;
-            const basePath = hasKey ? '' : path;
+function reconcile2(vnode, keyMap, actualUIDs, path, namespace, ctx, out) {
+    if (vnode == null) return;
 
-            if (newNode.childs) {
-                for (let i = 0; i < newNode.childs.length; i++) {
-                    const child = newNode.childs[i];
-                    reconcile(child, child, parentDOM, ctx, basePath + ',' + i, keyMap, namespace);
-                }
-            }
-            return newNode._nodes;
-        } else {
-            return extractNodes(newNode);
-        }
-    }
-
-    if (newNode == null) {
-        if (oldNode != null) unmountVdom(oldNode);
-        return null;
-    }
-    if (oldNode == null) {
-        return mountNode(newNode, parentDOM, ctx, path, keyMap, namespace);
-    }
-
-    const oldIsText = oldNode._text !== undefined;
-    const newIsText = newNode._text !== undefined;
-
-    if (oldIsText && newIsText) {
-        if (oldNode._el) {
-            // ⚡ Оптимизация: skip nodeValue update если текст не изменился
-            // Критично для "Update 1 of 5000": 4999 из 5000 текстов не меняются
-            if (oldNode._text !== newNode._text) {
-                oldNode._el.nodeValue = newNode._text;
-            }
-            newNode._el = oldNode._el;
-            return newNode._el;
-        }
-        return mountNode(newNode, parentDOM, ctx, path, keyMap, namespace);
-    }
-    if (oldIsText || newIsText) {
-        unmountVdom(oldNode);
-        return mountNode(newNode, parentDOM, ctx, path, keyMap, namespace);
-    }
-
-    if (Array.isArray(newNode)) {
-        if (Array.isArray(oldNode)) {
-            return reconcileChildren(oldNode, newNode, parentDOM, ctx, path, keyMap, namespace);
-        }
-        unmountVdom(oldNode);
-        return mountNode(newNode, parentDOM, ctx, path, keyMap, namespace);
-    }
-    if (Array.isArray(oldNode)) {
-        unmountVdom(oldNode);
-        return mountNode(newNode, parentDOM, ctx, path, keyMap, namespace);
-    }
-
-    if (oldNode.tag !== newNode.tag) {
-        unmountVdom(oldNode);
-        return mountNode(newNode, parentDOM, ctx, path, keyMap, namespace);
-    }
-
-    const tag = newNode.tag;
-    if (tag === Fragment) {
-        return reconcileFragment(oldNode, newNode, parentDOM, ctx, path, keyMap, namespace);
-    }
-    if (tag === Portal) {
-        return reconcilePortal(oldNode, newNode, parentDOM, ctx, path, keyMap, namespace);
-    }
-    if (typeof tag === 'function' && tag._definition) {
-        return reconcileComponent(oldNode, newNode, parentDOM, ctx, path, keyMap, namespace);
-    }
-    if (typeof tag === 'string') {
-        return reconcileHTML(oldNode, newNode, parentDOM, ctx, path, keyMap, namespace);
-    }
-    return null;
-}
-
-function extractNodes(vnode) {
-    if (vnode == null) return null;
     if (Array.isArray(vnode)) {
-        const r = [];
-        for (let i = 0; i < vnode.length; i++) pushAll(r, extractNodes(vnode[i]));
-        return r;
-    }
-    if (vnode._text !== undefined) return vnode._el || null;
-    if (vnode._el) return vnode._el;
-    if (Array.isArray(vnode._nodes)) return vnode._nodes;
-    return null;
-}
-
-function reconcileChildren(oldChilds, newChilds, parentDOM, ctx, path, keyMap, namespace) {
-    const oldNodes = collectDOMNodes(oldChilds);
-    const newNodes = [];
-    const max = Math.max(oldChilds ? oldChilds.length : 0, newChilds ? newChilds.length : 0);
-    for (let i = 0; i < max; i++) {
-        const childPath = path + ',' + i;
-        const oc = oldChilds && i < oldChilds.length ? oldChilds[i] : null;
-        const nc = newChilds && i < newChilds.length ? newChilds[i] : null;
-        const r = reconcile(oc, nc, parentDOM, ctx, childPath, keyMap, namespace);
-        pushAll(newNodes, r);
-    }
-    if (parentDOM) syncDOMChildren(parentDOM, oldNodes, newNodes);
-    return newNodes;
-}
-
-// ============================================================================
-// Mount HTML
-// ============================================================================
-
-function mountHTML(vnode, parentDOM, ctx, path, keyMap, namespace) {
-    if (vnode.tag === 'svg') namespace = SVG_NS;
-    const isForeignObject = vnode.tag === 'foreignObject';
-    const dom = namespace === SVG_NS
-        ? document.createElementNS(SVG_NS, vnode.tag)
-        : document.createElement(vnode.tag);
-    vnode._el = dom;
-
-    const isSelect = dom.tagName === 'SELECT';
-
-    // ⚡ Fast-path mount: применяем props напрямую без сравнения с {}
-    // Для SELECT value применяется ПОСЛЕ mount children (нужны options)
-    applyPropsDirect(dom, vnode.props, namespace);
-
-    if (vnode.tag === 'textarea') return dom;
-
-    // ⚡ Прямой appendChild вместо сбора в массив + appendAll(dom, childNodes)
-    // mountNode уже добавляет элементы в dom через appendChild внутри себя для HTML,
-    // но раньше мы собирали их в массив и потом prepend. Теперь mountHTML добавляет
-    // детей напрямую через dom.appendChild когда r — DOM-узел.
-    const childNamespace = isForeignObject ? HTML_NS : namespace;
-    for (let i = 0; i < vnode.childs.length; i++) {
-        const childPath = path + ',' + i;
-        const r = mountNode(vnode.childs[i], dom, ctx, childPath, keyMap, childNamespace);
-        // r может быть: DOM-узел, массив DOM-узлов, null
-        if (r == null) continue;
-        if (Array.isArray(r)) {
-            for (let j = 0; j < r.length; j++) {
-                if (r[j]) dom.appendChild(r[j]);
-            }
-        } else {
-            dom.appendChild(r);
+        const len = vnode.length;
+        if (len === 0) return;
+        const prefix = path + ',';
+        for (let i = 0; i < len; i++) {
+            reconcile2(vnode[i], keyMap, actualUIDs, prefix + i, namespace, ctx, out);
         }
+        return;
     }
 
-    if (isSelect && vnode.props && 'value' in vnode.props) {
+    if (vnode._text !== undefined) {
+        const elementUID = path;
+        actualUIDs.add(elementUID);
+        const oldElement = keyMap.get(elementUID);
+
+        if (oldElement && oldElement._text !== undefined) {
+            if (oldElement._text !== vnode._text) {
+                oldElement._el.nodeValue = vnode._text;
+            }
+            vnode._el = oldElement._el;
+            keyMap.set(elementUID, vnode);
+            out.push(vnode._el);
+            return;
+        }
+
+        if (oldElement) {
+            unmountVdom(oldElement);
+        }
+
+        const t = document.createTextNode(vnode._text);
+        vnode._el = t;
+        keyMap.set(elementUID, vnode);
+        out.push(t);
+        return;
+    }
+
+    // Вычисляем elementUID. Если у vnode есть user key и он уже в actualUIDs —
+    // duplicate key. Первый key выигрывает, дубликат получает path-based UID.
+    // Warning в dev режиме — здесь же, отдельный проход не нужен.
+    let elementUID;
+    const userKey = vnode.props?.key;
+    if (userKey !== undefined) {
+        const keyedUID = '#' + escapeKey(userKey);
+        if (actualUIDs.has(keyedUID)) {
+            if (IS_DEV) console.warn(`⚠️ Warning: Duplicate key "${userKey}" detected. First occurrence wins, duplicates treated as no-key.`);
+            elementUID = path;
+        } else {
+            elementUID = keyedUID;
+        }
+    } else {
+        elementUID = path;
+    }
+    actualUIDs.add(elementUID);
+
+    const tag = vnode.tag;
+    const oldElement = keyMap.get(elementUID);
+
+    // Порядок проверок: string (чаще всего) → Fragment → Component → Portal
+    if (typeof tag === 'string') { reconcile2HTML(vnode, keyMap, actualUIDs, elementUID, namespace, ctx, oldElement, out); return; }
+    if (tag === Fragment) { reconcile2Fragment(vnode, keyMap, actualUIDs, elementUID, namespace, ctx, oldElement, out); return; }
+    if (typeof tag === 'function' && tag._definition) {
+        if (ctx) ctx[_HAS_CHILD_COMPS] = true;
+        reconcile2Component(vnode, keyMap, actualUIDs, elementUID, namespace, ctx, oldElement, out); return;
+    }
+    if (tag === Portal) { reconcile2Portal(vnode, keyMap, actualUIDs, elementUID, namespace, ctx, oldElement, out); return; }
+}
+
+function reconcile2HTML(vnode, keyMap, actualUIDs, path, namespace, ctx, oldElement, out) {
+    const tag = vnode.tag;
+
+    // Fast path: первый mount простого HTML-элемента (не SVG, не textarea).
+    if (!oldElement && namespace === HTML_NS && tag !== 'svg' && tag !== 'foreignObject' && tag !== 'textarea') {
+        const dom = document.createElement(tag);
+        const tagName = dom.tagName;
+        const isForm = tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT';
+        const props = vnode.props;
+        if (props) {
+            for (const k in props) {
+                if (k === 'key' || k === 'ref' || k === 'children') continue;
+                if (isForm && (k === 'value' || k === 'checked')) continue;
+                applyProp(dom, k, props[k], namespace);
+            }
+            if (isForm && tagName !== 'SELECT') {
+                if ('value' in props) applyProp(dom, 'value', props.value, namespace);
+                if ('checked' in props) applyProp(dom, 'checked', props.checked, namespace);
+            }
+        }
+        vnode._el = dom;
+        keyMap.set(path, vnode);
+        props?.ref?.(dom);
+
+        const newNodes = [];
+        reconcile2(vnode.childs, keyMap, actualUIDs, path, namespace, ctx, newNodes);
+        vnode._nodes = newNodes;
+        syncDOMChildren(dom, EMPTY, newNodes);
+
+        if (tagName === 'SELECT' && props && 'value' in props) {
+            applyProp(dom, 'value', props.value, namespace);
+        }
+        out.push(dom);
+        return;
+    }
+
+    if (tag === 'svg') namespace = SVG_NS;
+    const isForeignObject = tag === 'foreignObject';
+
+    let dom;
+    let oldNodes = [];
+
+    if (oldElement && typeof oldElement.tag === 'string' && oldElement.tag === vnode.tag) {
+        dom = oldElement._el;
+        oldNodes = oldElement._nodes || [];
+        keyMap.set(path, vnode);
+
+        let shouldRecreate = false;
+        for (const attr of RECREATE_ATTRS) {
+            if (oldElement.props[attr] !== vnode.props[attr]) { shouldRecreate = true; break; }
+        }
+        if (oldElement.tag === 'select' && oldElement.props.multiple !== vnode.props.multiple) { shouldRecreate = true; }
+
+        if (shouldRecreate) {
+            unmountVdom(oldElement);
+            dom = namespace === SVG_NS
+                ? document.createElementNS(SVG_NS, vnode.tag)
+                : document.createElement(vnode.tag);
+            applyPropsDirect(dom, vnode.props, namespace);
+            oldNodes = [];
+        } else {
+            const oldProps = oldElement.props;
+            const newProps = vnode.props;
+            let propsChanged = false;
+            if (oldProps !== newProps) {
+                for (const k in oldProps) { if (!(k in newProps) || oldProps[k] !== newProps[k]) { propsChanged = true; break; } }
+                if (!propsChanged) { for (const k in newProps) { if (!(k in oldProps)) { propsChanged = true; break; } } }
+            }
+            if (propsChanged) {
+                applyProps(dom, oldElement.props, vnode.props, namespace);
+            }
+        }
+    } else {
+        dom = namespace === SVG_NS
+            ? document.createElementNS(SVG_NS, vnode.tag)
+            : document.createElement(vnode.tag);
+        applyPropsDirect(dom, vnode.props, namespace);
+        if (oldElement) unmountVdom(oldElement);
+        keyMap.set(path, vnode);
+    }
+
+    vnode._el = dom;
+    vnode.props?.ref?.(dom);
+
+    if (tag === 'textarea') { vnode._nodes = []; out.push(dom); return; }
+
+    const childNamespace = isForeignObject ? HTML_NS : namespace;
+    const newNodes = [];
+    reconcile2(vnode.childs, keyMap, actualUIDs, path, childNamespace, ctx, newNodes);
+    vnode._nodes = newNodes;
+
+    syncDOMChildren(dom, oldNodes, newNodes);
+
+    if (dom.tagName === 'SELECT' && 'value' in vnode.props) {
         applyProp(dom, 'value', vnode.props.value, namespace);
     }
 
-    return dom;
+    out.push(dom);
 }
 
-function reconcileHTML(oldVnode, newVnode, parentDOM, ctx, path, keyMap, namespace) {
-    if (newVnode.tag === 'svg') namespace = SVG_NS;
-    const isForeignObject = newVnode.tag === 'foreignObject';
+function reconcile2Fragment(vnode, keyMap, actualUIDs, path, namespace, ctx, oldElement, out) {
+    const hasKey = vnode.props?.key !== undefined;
 
-    let shouldRecreate = false;
-    for (const attr of RECREATE_ATTRS) {
-        if (oldVnode.props[attr] !== newVnode.props[attr]) {
-            shouldRecreate = true;
-            break;
+    if (hasKey && oldElement && oldElement.tag === Fragment) {
+        keyMap.set(path, vnode);
+        const newNodes = [];
+        reconcile2(vnode.childs, keyMap, actualUIDs, path, namespace, ctx, newNodes);
+        vnode._nodes = newNodes;
+        vnode._instance = oldElement._instance;
+        for (let i = 0; i < newNodes.length; i++) out.push(newNodes[i]);
+    } else {
+        if (oldElement && oldElement.tag !== Fragment) {
+            unmountVdom(oldElement);
+        }
+        const nodes = [];
+        reconcile2(vnode.childs, keyMap, actualUIDs, path, namespace, ctx, nodes);
+        vnode._nodes = nodes;
+        for (let i = 0; i < nodes.length; i++) out.push(nodes[i]);
+    }
+}
+
+function reconcile2Component(vnode, keyMap, actualUIDs, path, namespace, ctx, oldElement, out) {
+    const def = vnode.tag._definition;
+
+    const canReuse = oldElement && oldElement.tag === vnode.tag && oldElement._instance;
+    let inst;
+
+    if (canReuse) {
+        inst = oldElement._instance;
+    } else {
+        if (oldElement) unmountVdom(oldElement);
+        inst = new vnode.tag();
+        attachInstanceAPI(inst);
+    }
+
+    // Общий setup для обоих путей (reuse и create)
+    keyMap.set(path, vnode);
+    inst[_INCOMING_PROPS] = buildIncomingProps(vnode.props, vnode.childs);
+    inst[_PARENT_CTX] = ctx;
+    inst[_NAMESPACE] = namespace;
+    vnode._instance = inst;
+
+    if (!canReuse) {
+        // Первичная инициализация (только для нового instance)
+        if (def.props) { inst.props = def.props.call(inst, inst[_INCOMING_PROPS]); }
+        else { inst.props = inst[_INCOMING_PROPS]; }
+
+        inst[_IS_INITIALIZING] = true;
+        if (def.init) def.init.call(inst, inst.props);
+        inst[_IS_INITIALIZING] = false;
+    }
+
+    // Рендер (общий для обоих путей).
+    // Изоляция ошибок только в DEV. В PROD ошибка пробрасывается (fail fast).
+    if (IS_DEV) {
+        try { inst[_RERENDER](); } catch (err) {
+            const name = def.name || 'Component';
+            console.error('❌ Error in component "' + name + '":\n', err);
+            if (!canReuse) inst[_NODES] = [];
+        }
+    } else {
+        inst[_RERENDER]();
+    }
+
+    if (!canReuse) {
+        // ref для нового компонента — после rerender (inst готов)
+        vnode.props?.ref?.(inst);
+        // Добавляем в очередь для onMounted (вызовется после всего reconcile2)
+        if (mountedQueue) {
+            inst[_IS_MOUNTED] = true;
+            mountedQueue.push(inst);
         }
     }
-    if (oldVnode.tag === 'select' &&
-        oldVnode.props.multiple !== newVnode.props.multiple) {
-        shouldRecreate = true;
+
+    // Компонент возвращает массив узлов (inst[_NODES]) — добавляем в out
+    const nodes = inst[_NODES];
+    if (nodes) {
+        for (let i = 0; i < nodes.length; i++) out.push(nodes[i]);
+    }
+}
+
+
+function reconcilePortalChildren(inst, vnode, keyMap, actualUIDs, path, namespace, ctx) {
+    const container = vnode.props.containerGetter();
+
+    // Case 1: первый mount — контейнера ещё не было, теперь есть.
+    // Дети портала используют родительский keyMap/actualUIDs (portal не изолирует детей).
+    if (!inst[_CONTAINER] && container) {
+        inst[_CONTAINER] = container;
+        const childNodes = [];
+        reconcile2(vnode.childs, keyMap, actualUIDs, path, namespace, ctx, childNodes);
+        inst[_RENDERED] = vnode.childs;
+        inst[_NODES] = childNodes;
+        appendAll(container, inst[_NODES]);
+        return;
     }
 
-    if (shouldRecreate) {
-        unmountVdom(oldVnode);
-        return mountNode(newVnode, parentDOM, ctx, path, keyMap, namespace);
+    // Case 2: контейнер исчез — размонтируем контент.
+    // unmountVdom удалит vnode, родительский cleanup уберёт из keyMap (по actualUIDs).
+    if (inst[_CONTAINER] && !container) {
+        if (inst[_RENDERED]) unmountVdom(inst[_RENDERED]);
+        inst[_RENDERED] = null;
+        inst[_NODES] = [];
+        inst[_CONTAINER] = null;
+        return;
     }
 
-    const dom = oldVnode._el;
-    newVnode._el = dom;
+    // Case 3: контейнер есть и был — reconcile детей
+    if (!inst[_CONTAINER] || !container) return;  // защитный guard (не должен срабатывать)
 
-    const isSelect = dom.tagName === 'SELECT';
-
-    // ⚡ Оптимизация: shallow props comparison — skip applyProps если props идентичны
-    // Критично для "Update 1 of 5000": 4999 div'ов с одинаковыми props {key:id}
-    // applyProps делает for...in дважды + applyProp вызовы — expensive
-    const oldProps = oldVnode.props;
-    const newProps = newVnode.props;
-    let propsChanged = false;
-    if (oldProps !== newProps) {
-        // Проверяем все ключи old + new
-        for (const k in oldProps) {
-            if (!(k in newProps) || oldProps[k] !== newProps[k]) { propsChanged = true; break; }
-        }
-        if (!propsChanged) {
-            for (const k in newProps) {
-                if (!(k in oldProps)) { propsChanged = true; break; }
+    // Смена контейнера — физически перемещаем узлы без unmount
+    if (inst[_CONTAINER] !== container) {
+        const oldContainer = inst[_CONTAINER];
+        inst[_CONTAINER] = container;
+        for (let i = 0; i < inst[_NODES].length; i++) {
+            const n = inst[_NODES][i];
+            if (n?.parentNode === oldContainer) {
+                oldContainer.removeChild(n);
+                container.appendChild(n);
             }
         }
     }
 
-    if (propsChanged) {
-        if (isSelect) {
-            const oldPropsWithoutValue = {};
-            for (const k in oldVnode.props) {
-                if (k !== 'value') oldPropsWithoutValue[k] = oldVnode.props[k];
-            }
-            const newPropsWithoutValue = {};
-            for (const k in newVnode.props) {
-                if (k !== 'value') newPropsWithoutValue[k] = newVnode.props[k];
-            }
-            applyProps(dom, oldPropsWithoutValue, newPropsWithoutValue, namespace);
-        } else {
-            applyProps(dom, oldVnode.props, newVnode.props, namespace);
+    // Reconcile детей портала с родительским keyMap/actualUIDs.
+    // reconcile2 заполнит keyMap/actualUIDs, cleanup сделает родитель.
+    const oldNodes = inst[_NODES];
+    const newNodes = [];
+    reconcile2(vnode.childs, keyMap, actualUIDs, path, namespace, ctx, newNodes);
+
+    inst[_RENDERED] = vnode.childs;
+    inst[_NODES] = newNodes;
+    syncDOMChildren(container, oldNodes, newNodes);
+}
+
+function reconcile2Portal(vnode, keyMap, actualUIDs, path, namespace, ctx, oldElement, out) {
+    let inst = null;
+
+    if (oldElement && oldElement.tag === Portal && oldElement._instance) {
+        inst = oldElement._instance;
+    } else {
+        if (oldElement) {
+            unmountVdom(oldElement);
         }
+        inst = {
+            [_IS_PORTAL]: true,
+            [_RENDERED]: null,
+            [_NODES]: [],
+            [_ANCHOR]: document.createTextNode(''),
+            [_CONTAINER]: null,
+            [_NAMESPACE]: namespace
+        };
+    }
+    // Записываем vnode в keyMap (для обоих путей — reuse и create)
+    keyMap.set(path, vnode);
+
+    vnode._instance = inst;
+    inst[_NAMESPACE] = namespace;
+    vnode.props?.ref?.(inst);
+
+    reconcilePortalChildren(inst, vnode, keyMap, actualUIDs, path, namespace, ctx);
+
+    out.push(inst[_ANCHOR]);
+}
+
+// ============================================================================
+// Memo-skip
+// ============================================================================
+
+function refreshMemoSubtree(vnode, ctx, namespace, out) {
+    if (vnode == null) return;
+    if (Array.isArray(vnode)) {
+        for (let i = 0; i < vnode.length; i++) { refreshMemoSubtree(vnode[i], ctx, namespace, out); }
+        return;
+    }
+    if (vnode._text !== undefined) {
+        if (vnode._el) out.push(vnode._el);
+        return;
     }
 
-    if (newVnode.tag === 'textarea') {
-        newVnode._nodes = [];
-        return dom;
-    }
+    const tag = vnode.tag;
 
-    const childNamespace = isForeignObject ? HTML_NS : namespace;
-    newVnode._nodes = reconcileChildren(
-        oldVnode.childs, newVnode.childs, dom, ctx, path, keyMap, childNamespace
-    );
-
-    if (isSelect && 'value' in newVnode.props) {
-        if (oldVnode.props.value !== newVnode.props.value) {
-            applyProp(dom, 'value', newVnode.props.value, namespace);
+    if (tag === Portal) {
+        const inst = vnode._instance;
+        if (inst) {
+            const keyMap = new Map();
+            const actualUIDs = new Set();
+            reconcilePortalChildren(inst, vnode, keyMap, actualUIDs, '', namespace, ctx);
         }
+        if (inst && inst[_NODES]) { for (let i = 0; i < inst[_NODES].length; i++) out.push(inst[_NODES][i]); }
+        return;
     }
 
-    return dom;
+    if (typeof tag === 'function' && tag._definition) {
+        const inst = vnode._instance;
+        if (inst) {
+            if (IS_DEV) {
+                try { inst[_RERENDER](); } catch (err) {
+                    const name = inst[_DEF]?.name || 'Component';
+                    console.error('❌ Error in component "' + name + '":\n', err);
+                }
+            } else {
+                inst[_RERENDER]();
+            }
+            if (inst[_NODES]) { for (let i = 0; i < inst[_NODES].length; i++) out.push(inst[_NODES][i]); }
+        }
+        return;
+    }
+
+    if (tag === Fragment) {
+        if (vnode.childs) {
+            for (let i = 0; i < vnode.childs.length; i++) { refreshMemoSubtree(vnode.childs[i], ctx, namespace, out); }
+        }
+        return;
+    }
+
+    if (vnode.childs) {
+        for (let i = 0; i < vnode.childs.length; i++) { refreshMemoSubtree(vnode.childs[i], ctx, namespace, out); }
+    }
+    if (vnode._el) out.push(vnode._el);
 }
 
 // ============================================================================
 // Props helpers
 // ============================================================================
 
-// ⚡ Оптимизация: filter → ручной цикл с pre-allocation
 function buildIncomingProps(rawProps, childs) {
-    const out = {};
+    const out = {children: rawProps.children ?? childs};
     for (const k in rawProps) {
-        if (k !== 'children' && k !== 'key' && k !== 'ref') {
-            out[k] = rawProps[k];
-        }
-    }
-    if (rawProps && rawProps.children !== undefined) {
-        out.children = rawProps.children;
-    } else if (childs && childs.length > 0) {
-        // ⚡ Ручной цикл вместо filter
-        const filtered = [];
-        let len = 0;
-        for (let i = 0; i < childs.length; i++) {
-            if (childs[i] !== null) {
-                filtered[len++] = childs[i];
-            }
-        }
-        out.children = len === 1 ? filtered[0] : filtered;
-    } else {
-        out.children = null;
+        if (k === 'key' || k === 'ref' || k === 'children') continue;
+        out[k] = rawProps[k];
     }
     return out;
-}
-
-// ============================================================================
-// Mount/Reconcile Component
-// ============================================================================
-
-function mountComponent(vnode, parentDOM, ctx, path, keyMap, namespace) {
-    const def = vnode.tag._definition;
-    const mapKey = makeMapKey(vnode, path);
-    let found = keyMap ? keyMap.get(mapKey) : null;
-
-    let inst = null;
-    if (found && found._definition === def) {
-        inst = found;
-        if (keyMap) keyMap.delete(mapKey);
-    }
-
-    if (inst) {
-        inst._incomingProps = buildIncomingProps(vnode.props, vnode.childs);
-        inst._cachedIncomingProps = inst._incomingProps;
-        inst._cachedPropsVnode = vnode;
-        inst._parentContext = ctx;
-        inst._parentDOM = parentDOM;
-        inst._namespace = namespace;
-        try {
-            inst._rerender();
-        } catch (err) {
-            const name = def.name || 'Component';
-            console.error('❌ Error in component "' + name + '":\n', err);
-        }
-        vnode._instance = inst;
-        return inst._nodes;
-    }
-    inst = new vnode.tag();
-    attachInstanceAPI(inst);
-    inst._incomingProps = buildIncomingProps(vnode.props, vnode.childs);
-    inst._cachedIncomingProps = inst._incomingProps;
-    inst._cachedPropsVnode = vnode;
-    inst._parentContext = ctx;
-    inst._parentDOM = parentDOM;
-    inst._namespace = namespace;
-    vnode._instance = inst;
-
-    if (def.props) {
-        inst.props = def.props.call(inst, inst._incomingProps);
-    } else {
-        inst.props = inst._incomingProps;
-    }
-
-    inst._isInitializing = true;
-    if (def.init) def.init.call(inst, inst.props);
-    inst._isInitializing = false;
-
-    try {
-        inst._rerender();
-    } catch (err) {
-        const name = def.name || 'Component';
-        console.error('❌ Error in component "' + name + '":\n', err);
-        inst._nodes = [];
-    }
-    return inst._nodes;
-}
-
-function reconcileComponent(oldVnode, newVnode, parentDOM, ctx, path, keyMap, namespace) {
-    const inst = oldVnode._instance;
-    newVnode._instance = inst;
-    // ⚡ Оптимизация memo-skip: переиспользуем _incomingProps если тот же vnode
-    // В memo-skip path oldVnode === newVnode → props не изменились → кэш валиден
-    if (inst._cachedPropsVnode === newVnode) {
-        inst._incomingProps = inst._cachedIncomingProps;
-    } else {
-        inst._incomingProps = buildIncomingProps(newVnode.props, newVnode.childs);
-        inst._cachedIncomingProps = inst._incomingProps;
-        inst._cachedPropsVnode = newVnode;
-    }
-    inst._parentContext = ctx;
-    inst._parentDOM = parentDOM;
-    inst._namespace = namespace;
-    try {
-        inst._rerender();
-    } catch (err) {
-        const name = inst._definition?.name || 'Component';
-        console.error('❌ Error in component "' + name + '":\n', err);
-    }
-    return inst._nodes;
-}
-
-// ============================================================================
-// Mount/Reconcile Fragment
-// ============================================================================
-
-function mountFragment(vnode, parentDOM, ctx, path, keyMap, namespace) {
-    const hasKey = vnode.props && vnode.props.key !== undefined;
-
-    if (hasKey && keyMap) {
-        const mapKey = makeMapKey(vnode, path);
-        const oldVnode = keyMap.get(mapKey);
-
-        if (oldVnode && oldVnode.tag === Fragment) {
-            keyMap.delete(mapKey);
-
-            const nodes = reconcileChildren(
-                oldVnode.childs, vnode.childs, parentDOM, ctx,
-                '', keyMap, namespace
-            );
-
-            vnode._nodes = nodes;
-            vnode._instance = oldVnode._instance;
-            return nodes;
-        }
-    }
-
-    const basePath = hasKey ? '' : path;
-    const nodes = [];
-    for (let i = 0; i < vnode.childs.length; i++) {
-        const childPath = basePath + ',' + i;
-        const r = mountNode(vnode.childs[i], parentDOM, ctx, childPath, keyMap, namespace);
-        pushAll(nodes, r);
-    }
-    vnode._nodes = nodes;
-
-    if (hasKey) {
-        vnode._instance = { _isKeyedFragment: true };
-    }
-
-    return nodes;
-}
-
-// ⚡ Оптимизация memo-skip: целевой обход поддерева без полноценного reconcile
-// Вызывает _rerender только для дочерних компонентов и порталов.
-// Пропускает: applyProps для HTML (props не изменились — vnode тот же),
-//             extractNodes, collectDOMNodes, type checks в reconcile.
-// Возвращает: DOM-узлы верхнего уровня (как reconcile) для обновления inst._nodes.
-// Контракт: vnode это старый vnode (memo-skip path), _el/_nodes уже установлены.
-function refreshMemoSubtree(vnode, parentDOM, ctx, namespace) {
-    if (vnode == null) return null;
-    if (Array.isArray(vnode)) {
-        const out = [];
-        for (let i = 0; i < vnode.length; i++) {
-            pushAll(out, refreshMemoSubtree(vnode[i], parentDOM, ctx, namespace));
-        }
-        return out;
-    }
-    if (vnode._text !== undefined) {
-        return vnode._el || null;
-    }
-    const tag = vnode.tag;
-    if (tag === Portal) {
-        reconcilePortal(vnode, vnode, parentDOM, ctx, '', null, namespace);
-        return vnode._instance._nodes;
-    }
-    if (typeof tag === 'function' && tag._definition) {
-        // ⚡ Оптимизация: напрямую _rerender вместо reconcileComponent
-        // В memo-skip path vnode тот же → _incomingProps уже на instance (через кэш)
-        // Пропускаем: buildIncomingProps, _parentContext/_parentDOM/_namespace присваивания
-        // inst._parentContext не обновляем — но это безопасно: memo-skip у РОДИТЕЛЯ значит
-        // что родитель не рендерился → ctx родителя не изменился → _parentContext ребёнка валиден
-        const inst = vnode._instance;
-        if (inst) {
-            try {
-                inst._rerender();
-            } catch (err) {
-                const name = inst._definition?.name || 'Component';
-                console.error('❌ Error in component "' + name + '":\n', err);
-            }
-        }
-        return inst ? inst._nodes : null;
-    }
-    if (tag === Fragment) {
-        if (vnode.childs) {
-            for (let i = 0; i < vnode.childs.length; i++) {
-                refreshMemoSubtree(vnode.childs[i], parentDOM, ctx, namespace);
-            }
-        }
-        return vnode._nodes;
-    }
-    // HTML-тег: обходим детей с vnode._el как parentDOM, возвращаем _el
-    if (vnode.childs) {
-        const childParent = vnode._el;
-        for (let i = 0; i < vnode.childs.length; i++) {
-            refreshMemoSubtree(vnode.childs[i], childParent, ctx, namespace);
-        }
-    }
-    return vnode._el;
-}
-
-function reconcileFragment(oldVnode, newVnode, parentDOM, ctx, path, keyMap, namespace) {
-    const hasKey = newVnode.props && newVnode.props.key !== undefined;
-    const basePath = hasKey ? '' : path;
-
-    const nodes = reconcileChildren(
-        oldVnode.childs, newVnode.childs, parentDOM, ctx,
-        basePath, keyMap, namespace
-    );
-
-    newVnode._nodes = nodes;
-
-    if (hasKey) {
-        newVnode._instance = oldVnode._instance || { _isKeyedFragment: true };
-    }
-
-    return nodes;
-}
-
-// ============================================================================
-// Mount/Reconcile Portal
-// ============================================================================
-
-function mountPortal(vnode, parentDOM, ctx, path, keyMap, namespace) {
-    const inst = {
-        _isPortal: true,
-        _rendered: null,
-        _nodes: [],
-        _anchor: document.createTextNode(''),
-        _container: null,
-        _mounted: false,
-        _namespace: namespace
-    };
-    vnode._instance = inst;
-    const container = vnode.props.containerGetter();
-    if (container) {
-        inst._container = container;
-        const childNodes = mountNode(vnode.childs, container, ctx, path, keyMap, namespace);
-        inst._rendered = vnode.childs;
-        inst._nodes = Array.isArray(childNodes)
-            ? childNodes
-            : (childNodes ? [childNodes] : []);
-        appendAll(container, inst._nodes);
-        callRefs(vnode.childs);
-        triggerMounted(vnode.childs);
-        inst._mounted = true;
-    }
-    return [inst._anchor];
-}
-
-function reconcilePortal(oldVnode, newVnode, parentDOM, ctx, path, keyMap, namespace) {
-    const inst = oldVnode._instance;
-    newVnode._instance = inst;
-    inst._namespace = namespace;
-    const container = newVnode.props.containerGetter();
-
-    if (!inst._container && container) {
-        inst._container = container;
-        const childNodes = mountNode(newVnode.childs, container, ctx, path, keyMap, namespace);
-        inst._rendered = newVnode.childs;
-        inst._nodes = Array.isArray(childNodes)
-            ? childNodes
-            : (childNodes ? [childNodes] : []);
-        appendAll(container, inst._nodes);
-        callRefs(newVnode.childs);
-        triggerMounted(newVnode.childs);
-        inst._mounted = true;
-    } else if (inst._container && !container) {
-        if (inst._rendered) unmountVdom(inst._rendered);
-        for (let i = 0; i < inst._nodes.length; i++) {
-            const n = inst._nodes[i];
-            if (n && n.parentNode) n.parentNode.removeChild(n);
-        }
-        inst._rendered = null;
-        inst._nodes = [];
-        inst._container = null;
-        inst._mounted = false;
-    } else if (inst._container && container) {
-        if (inst._container !== container) {
-            if (inst._rendered) unmountVdom(inst._rendered);
-            for (let i = 0; i < inst._nodes.length; i++) {
-                const n = inst._nodes[i];
-                if (n && n.parentNode) n.parentNode.removeChild(n);
-            }
-            inst._container = container;
-            const childNodes = mountNode(newVnode.childs, container, ctx, path, keyMap, namespace);
-            inst._rendered = newVnode.childs;
-            inst._nodes = Array.isArray(childNodes)
-                ? childNodes
-                : (childNodes ? [childNodes] : []);
-            appendAll(container, inst._nodes);
-            callRefs(newVnode.childs);
-            triggerMounted(newVnode.childs);
-        } else {
-            inst._nodes = reconcileChildren(
-                inst._rendered, newVnode.childs, container, ctx, path, keyMap, namespace
-            );
-            inst._rendered = newVnode.childs;
-        }
-    }
-    return [inst._anchor];
-}
-
-// ============================================================================
-// Mount Node (универсальная)
-// ============================================================================
-
-function mountNode(vnode, parentDOM, ctx, path, keyMap, namespace) {
-    if (vnode == null) return null;
-    if (vnode._text !== undefined) {
-        const t = document.createTextNode(vnode._text);
-        vnode._el = t;
-        return t;
-    }
-    if (Array.isArray(vnode)) {
-        const nodes = [];
-        for (let i = 0; i < vnode.length; i++) {
-            const childPath = path + ',' + i;
-            const r = mountNode(vnode[i], parentDOM, ctx, childPath, keyMap, namespace);
-            pushAll(nodes, r);
-        }
-        return nodes;
-    }
-    const tag = vnode.tag;
-    if (tag === Fragment) {
-        return mountFragment(vnode, parentDOM, ctx, path, keyMap, namespace);
-    }
-    if (tag === Portal) {
-        return mountPortal(vnode, parentDOM, ctx, path, keyMap, namespace);
-    }
-    if (typeof tag === 'function' && tag._definition) {
-        return mountComponent(vnode, parentDOM, ctx, path, keyMap, namespace);
-    }
-    if (typeof tag === 'string') {
-        return mountHTML(vnode, parentDOM, ctx, path, keyMap, namespace);
-    }
-    return null;
 }
 
 // ============================================================================
 // Mount — точка входа
 // ============================================================================
 
-// ⚡ Оптимизация: String(input) → "" + input
 function normalizeMountInput(input) {
     if (input === null || input === undefined) return null;
     if (typeof input === 'function' && input._definition) return h(input, {});
     if (Array.isArray(input)) return h(Fragment, {}, ...input);
-    if (typeof input === 'string' || typeof input === 'number') {
-        return { _text: "" + input };
-    }
+    if (typeof input === 'string' || typeof input === 'number') { return { _text: "" + input }; }
     if (typeof input === 'object' && input !== null) return input;
     throw new Error('mount(): unsupported input type: ' + typeof input);
 }
 
-// ⚡ Оптимизация: Array.push() → прямое присваивание
 function collectAllInstances(vnode) {
     const result = [];
     let len = 0;
-
     function walk(node) {
         if (!node) return;
-
-        if (Array.isArray(node)) {
-            for (const child of node) walk(child);
-            return;
-        }
-
+        if (Array.isArray(node)) { for (const child of node) walk(child); return; }
         if (typeof node !== 'object') return;
-
         if (typeof node.tag === 'function' && node.tag._definition) {
-            if (node._instance && node._instance._rerender) {
-                result[len++] = node._instance;
-                if (node._instance._vdom) walk(node._instance._vdom);
-            }
+            const inst = node._instance;
+            if (inst && inst[_RERENDER]) { result[len++] = inst; if (inst[_VDOM]) walk(inst[_VDOM]); }
             return;
         }
-
-        if (node.tag === Portal) {
-            if (node._instance && node._instance._rendered) {
-                walk(node._instance._rendered);
-            }
-            return;
-        }
-
-        if (node.tag === Fragment) {
-            if (Array.isArray(node._nodes)) {
-                for (const child of node._nodes) walk(child);
-            }
-            return;
-        }
-
-        if (node.childs) {
-            for (const child of node.childs) walk(child);
-        }
+        if (node.tag === Portal) { const inst = node._instance; if (inst && inst[_RENDERED]) walk(inst[_RENDERED]); return; }
+        if (node.tag === Fragment) { if (Array.isArray(node._nodes)) { for (const child of node._nodes) walk(child); } return; }
+        if (node.childs) { for (const child of node.childs) walk(child); }
     }
-
     walk(vnode);
     return result;
 }
 
 const mountedTrees = new WeakMap();
+const mountedKeyMaps = new WeakMap();
+const mountedRootInstances = new WeakMap();
+const mountedNodes = new WeakMap(); // top-level DOM узлы для syncDOMChildren
 const mountedContainers = new Set();
 
 function mount(input, container) {
@@ -1643,34 +1178,62 @@ function mount(input, container) {
             unmountVdom(oldVnode);
             container.replaceChildren();
             mountedTrees.delete(container);
+            mountedKeyMaps.delete(container);
+            mountedRootInstances.delete(container);
+            mountedNodes.delete(container);
             mountedContainers.delete(container);
         }
         return;
     }
 
-    if (oldVnode) {
+    if (!oldVnode) {
+        // Первый mount: keyMap пустой. actualUIDs — в dev настоящий Set (для duplicate warning),
+        // в prod заглушка (cleanup не нужен, duplicate detection пропускаем для скорости).
         const keyMap = new Map();
-        populateKeyMap(oldVnode, '', keyMap);
+        const actualUIDs = IS_DEV ? new Set() : NO_ACTUAL_UIDS;
+        mountedQueue = [];  // собираем новые компоненты для onMounted
+        const flat = [];
+        reconcile2(vnode, keyMap, actualUIDs, '', HTML_NS, null, flat);
 
-        const oldNodes = collectDOMNodes([oldVnode]);
-        reconcile(oldVnode, vnode, container, null, '', keyMap, HTML_NS);
-        const newNodes = collectDOMNodes([vnode]);
-        syncDOMChildren(container, oldNodes, newNodes);
+        for (let i = 0; i < flat.length; i++) {
+            container.appendChild(flat[i]);
+        }
+
         mountedTrees.set(container, vnode);
-        callRefs(vnode);
+        mountedKeyMaps.set(container, keyMap);
+        // Сохраняем корневой instance для refresh(). null если корень — не компонент.
+        mountedRootInstances.set(container, vnode._instance || null);
+        mountedNodes.set(container, flat);
+        mountedContainers.add(container);
+        triggerMounted();  // вызывает onMounted для всех собранных компонентов
         return vnode;
     }
 
-    const nodes = mountNode(vnode, container, null, '', null, HTML_NS);
-    const flat = Array.isArray(nodes) ? nodes : (nodes ? [nodes] : []);
-    appendAll(container, flat);
+    // Повторный mount: keyMap персистентный, после прошлого mount + cleanup актуальный.
+    // populateKeyMap НЕ нужен — reconcile2 сам заполняет, cleanup удаляет неиспользуемые.
+    const keyMap = mountedKeyMaps.get(container);
+    const actualUIDs = new Set();
+    mountedQueue = [];
 
-    checkDuplicateKeys(vnode, '');
+    // oldNodes — сохранённые при прошлом mount top-level DOM узлы (без O(n) обхода).
+    const oldNodes = mountedNodes.get(container) || [];
+    const flat = [];
+    reconcile2(vnode, keyMap, actualUIDs, '', HTML_NS, null, flat);
 
+    // Cleanup — unmount и удаление из keyMap того, чего нет в новом дереве.
+    for (const [key, oldElement] of keyMap) {
+        if (!actualUIDs.has(key)) {
+            unmountVdom(oldElement);
+            keyMap.delete(key);
+        }
+    }
+
+    syncDOMChildren(container, oldNodes, flat);
     mountedTrees.set(container, vnode);
-    mountedContainers.add(container);
-    callRefs(vnode);
-    triggerMounted(vnode);
+    mountedRootInstances.set(container, vnode._instance || null);
+    mountedNodes.set(container, flat);
+    triggerMounted();
+
     return vnode;
 }
 
@@ -1680,50 +1243,34 @@ function mount(input, container) {
 
 function refresh() {
     const start = performance.now();
-
     for (const container of mountedContainers) {
-        const vnode = mountedTrees.get(container);
-        if (!vnode) continue;
-
-        const instances = collectAllInstances(vnode);
-        for (const inst of instances) {
-            try {
-                inst.update();
-            } catch (err) {
-                console.error('refresh():', inst._definition?.name || 'Component', err);
+        const rootInst = mountedRootInstances.get(container);
+        if (rootInst) {
+            // Корневой компонент — update() запустит reconcile2, который обойдёт всё поддерево.
+            try { rootInst.update(); } catch (err) { console.error('refresh():', rootInst[_DEF]?.name || 'Component', err); }
+        } else {
+            // Корень — не компонент (HTML/Fragment). Обходим дерево чтобы найти компоненты.
+            const vnode = mountedTrees.get(container);
+            if (!vnode) continue;
+            const instances = collectAllInstances(vnode);
+            for (const inst of instances) {
+                try { inst.update(); } catch (err) { console.error('refresh():', inst[_DEF]?.name || 'Component', err); }
             }
         }
     }
-
     return new Promise(resolve => {
         const finish = () => resolve(performance.now() - start);
-
-        if (batchQueue.size === 0 && !isBatchScheduled) {
-            finish();
-        } else {
-            refreshResolvers.push(finish);
-        }
+        if (batchQueue.size === 0 && !isBatchScheduled) { finish(); }
+        else { refreshResolvers.push(finish); }
     });
 }
 
-// ⚡ Оптимизация: Array.from() → ручной цикл
 function _cleanupAll() {
     const containers = [];
     let len = 0;
-    for (const container of mountedContainers) {
-        containers[len++] = container;
-    }
-
-    for (let i = 0; i < len; i++) {
-        try {
-            mount(null, containers[i]);
-        } catch (e) {}
-    }
+    for (const container of mountedContainers) { containers[len++] = container; }
+    for (let i = 0; i < len; i++) { try { mount(null, containers[i]); } catch (e) {} }
 }
-
-// ============================================================================
-// Экспорт
-// ============================================================================
 
 export { h, Component, createPortal, Fragment, mount, refresh, _cleanupAll, setDevMode };
 
