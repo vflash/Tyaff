@@ -113,6 +113,7 @@ await refresh();  // all components will re-read the store
 
 - **[Documentation](DOCS.md)** — full API description, usage examples, lifecycle, context, portals, optimizations
 - **[Live example](example/index.html)** — interactive demo in the browser
+- **[BigListInput](example/big-list-input.html)** — Tyaff vs React
 - **[Benchmark](example/bench.html)** — performance comparison tyaff vs React (14 scenarios)
 - **[Changelog](CHANGELOG.md)** — what's new in the project
 
