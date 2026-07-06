@@ -1,6 +1,6 @@
 {
   "name": "tyaff",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "Tyaff — VDOM library for JavaScript",
   "type": "module",
   "main": "src/core.js",
