@@ -120,14 +120,7 @@ const _PARENT_CTX = Symbol('parentCtx');
 const _INCOMING_PROPS = Symbol('incomingProps');
 const _VDOM = Symbol('vdom');
 const _NODES = Symbol('nodes');
-const _PREV_MEMO = Symbol('prevMemo');
-const _KEY_MAP = Symbol('keyMap');
-const _REF_COLLECTORS = Symbol('refCollectors');
-const _UPDATE_RESOLVERS = Symbol('updateResolvers');
 const _IS_MOUNTED = Symbol('isMounted');
-const _IS_UPDATING = Symbol('isUpdating');
-const _IS_RENDERING = Symbol('isRendering');
-const _IS_INITIALIZING = Symbol('isInitializing');
 const _IN_CONTEXT_CALL = Symbol('inContextCall');
 const _NAMESPACE = Symbol('namespace');
 const _HAS_CHILD_COMPS = Symbol('hasChildComps');
@@ -139,7 +132,7 @@ const _RENDERED = Symbol('rendered');
 const _ANCHOR = Symbol('anchor');
 const _CONTAINER = Symbol('container');
 
-const RESERVED = new Set(['init','render','props','memo','onMounted','onUpdated','onUnmounted','context']);
+const RESERVED = new Set(['init','props','memo','onMounted','onUpdated','onUnmounted','context']);
 
 function Component(definition) {
     function ComponentClass() {
@@ -158,14 +151,7 @@ function Component(definition) {
         this.props = {};
         this[_VDOM] = null;
         this[_NODES] = [];
-        this[_PREV_MEMO] = null;
-        this[_KEY_MAP] = new Map();
-        this[_REF_COLLECTORS] = {};
-        this[_UPDATE_RESOLVERS] = null;
         this[_IS_MOUNTED] = false;
-        this[_IS_UPDATING] = false;
-        this[_IS_RENDERING] = false;
-        this[_IS_INITIALIZING] = false;
         this[_IN_CONTEXT_CALL] = false;
         this[_NAMESPACE] = HTML_NS;
         this[_HAS_CHILD_COMPS] = false;
@@ -239,26 +225,45 @@ function flushBatch() {
 // ============================================================================
 
 function attachInstanceAPI(inst) {
+    // Локальные переменные замыкания — не свойства instance.
+    // Меньше полей в конструкторе → стабильнее V8 hidden class → быстрее создание.
+    const def = inst[_DEF];
+    const { props: propsFn, memo: memoFn, init: initFn, render: renderFn, onUpdated: onUpdatedFn, context: contextDef } = def;
+    let isUpdating = false;
+    let isRendering = false;
+    let isInitialized = false;
+    let prevMemo = null;
+    let updateResolvers = null;
+    const refCollectors = {};
+    const keyMap = new Map();
+
     inst[_RERENDER] = function() {
-        if (inst[_IS_UPDATING]) return;
-        inst[_IS_UPDATING] = true;
+        if (isUpdating) return;
+        isUpdating = true;
         try { doRerender(); } catch (err) {
             if (IS_DEV) {
-                const name = inst[_DEF]?.name || 'Component';
+                const name = def.name || 'Component';
                 console.error('❌ Error in component "' + name + '":', err);
             } else { throw err; }
-        } finally { inst[_IS_UPDATING] = false; }
+        } finally { isUpdating = false; }
     };
 
     function doRerender() {
-        const d = inst[_DEF];
-        if (d.props) { inst.props = d.props.call(inst, inst[_INCOMING_PROPS]); }
+        const isFirstRender = !isInitialized;
+
+        // props() — при первом render и при каждом update
+        if (propsFn) { inst.props = propsFn.call(inst, inst[_INCOMING_PROPS]); }
         else { inst.props = inst[_INCOMING_PROPS] || {}; }
 
+        // init() — только при первом render, до memo/render
+        if (isFirstRender) {
+            if (initFn) initFn.call(inst, inst.props);
+            isInitialized = true;
+        }
+
         let shouldRender = true;
-        if (d.memo) {
-            const newDeps = d.memo.call(inst, inst.props);
-            const prevMemo = inst[_PREV_MEMO];
+        if (memoFn) {
+            const newDeps = memoFn.call(inst, inst.props);
             if (prevMemo && newDeps.length === prevMemo.length) {
                 let same = true;
                 for (let i = 0; i < newDeps.length; i++) {
@@ -266,7 +271,7 @@ function attachInstanceAPI(inst) {
                 }
                 if (same) shouldRender = false;
             }
-            inst[_PREV_MEMO] = newDeps;
+            prevMemo = newDeps;
         }
 
         const oldVdom = inst[_VDOM];
@@ -274,34 +279,18 @@ function attachInstanceAPI(inst) {
 
         if (shouldRender) {
             let newVdom;
-            // keyMap — персистентный Map на instance. После прошлого rerender + cleanup
-            // содержит актуальную карту текущего дерева. populateKeyMap НЕ нужен —
-            // reconcile2 сам заполняет keyMap.set'ом, cleanup удаляет неиспользуемые.
-            const keyMap = inst[_KEY_MAP];
-            inst[_IS_RENDERING] = true;
-            try { newVdom = d.render.call(inst, inst.props); } finally { inst[_IS_RENDERING] = false; }
+            isRendering = true;
+            try { newVdom = renderFn.call(inst, inst.props); } finally { isRendering = false; }
 
-            // actualUIDs нужен для duplicate detection и cleanup.
-            // На первом render (oldVdom null) — cleanup не нужен (keyMap пустой).
-            // В dev используем настоящий Set (для duplicate warning), в prod — заглушку.
             const actualUIDs = oldVdom ? new Set() : (IS_DEV ? new Set() : NO_ACTUAL_UIDS);
             const oldNodes = inst[_NODES];
-            // Сбрасываем флаг дочерних компонентов перед reconcile2.
-            // Если render выполняется — reconcile2 заполнит его заново.
-            // Если render заблокирован (memo-skip) — флаг остаётся с прошлого render.
             inst[_HAS_CHILD_COMPS] = false;
-            // Свой mountedQueue для этого rerender. Сохраняем родительский (если есть),
-            // чтобы вложенные rerender'ы (через reconcile2Component) не ломали очередь.
             const prevQueue = mountedQueue;
             mountedQueue = [];
 
             const flat = [];
             reconcile2(newVdom, keyMap, actualUIDs, '', inst[_NAMESPACE], inst, flat);
 
-            // Cleanup — unmount и удаление из keyMap того, чего нет в новом дереве.
-            // Нужен только если есть старое дерево (oldVdom). На первом render или после
-            // render→null — keyMap пустой, чистить нечего.
-            // После cleanup keyMap содержит только элементы нового дерева (= старое для следующего rerender).
             if (oldVdom) {
                 for (const [key, oldElement] of keyMap) {
                     if (!actualUIDs.has(key)) {
@@ -311,24 +300,16 @@ function attachInstanceAPI(inst) {
                 }
             }
 
-            // syncDOMChildren для inst[_NODES] делает родитель (reconcile2HTML или mount)
             inst[_NODES] = flat;
             inst[_VDOM] = newVdom;
 
-            // onMounted для новых компонентов, созданных во время этого rerender.
             triggerMounted();
             mountedQueue = prevQueue;
 
-            // onUpdated — только при update (не при первом mount).
-            // _isMounted ставится в triggerMounted после первого render.
-            // Важно: oldVdom не подходит как индикатор — если прошлый render вернул null,
-            // oldVdom будет null, но это update, и onUpdated должен вызваться.
-            if (inst[_IS_MOUNTED] && d.onUpdated) {
-                d.onUpdated.call(inst);
+            if (inst[_IS_MOUNTED] && onUpdatedFn) {
+                onUpdatedFn.call(inst);
             }
         } else {
-            // Memo-skip: render заблокирован. Если в поддереве нет дочерних компонентов
-            // (только HTML/text) — пропускаем refreshMemoSubtree, узлы не изменились.
             if (inst[_HAS_CHILD_COMPS]) {
                 const flat = [];
                 refreshMemoSubtree(oldVdom, inst, inst[_NAMESPACE], flat);
@@ -336,13 +317,13 @@ function attachInstanceAPI(inst) {
             }
         }
 
-        const resolvers = inst[_UPDATE_RESOLVERS];
-        inst[_UPDATE_RESOLVERS] = null;
+        const resolvers = updateResolvers;
+        updateResolvers = null;
         if (resolvers) { for (let i = 0; i < resolvers.length; i++) { resolvers[i](shouldRender); } }
     }
 
     inst.update = function(patch) {
-        if (inst[_IS_RENDERING]) {
+        if (isRendering) {
             console.error('❌ Cannot call update() inside render().');
             return Promise.resolve(false);
         }
@@ -350,7 +331,7 @@ function attachInstanceAPI(inst) {
             let hasKeys = false;
             for (const k in patch) { hasKeys = true; break; }
             if (!hasKeys) {
-                if (inst[_IS_INITIALIZING]) return Promise.resolve(false);
+                if (!isInitialized) return Promise.resolve(false);
                 return inst[_SCHEDULE_UPDATE]();
             }
             let changed = false;
@@ -358,24 +339,23 @@ function attachInstanceAPI(inst) {
             if (!changed) return Promise.resolve(false);
             for (const k in patch) { inst[k] = patch[k]; }
         }
-        if (inst[_IS_INITIALIZING]) return Promise.resolve(false);
+        if (!isInitialized) return Promise.resolve(false);
         return inst[_SCHEDULE_UPDATE]();
     };
 
     inst[_SCHEDULE_UPDATE] = function() {
         return new Promise(resolve => {
-            if (!inst[_UPDATE_RESOLVERS]) inst[_UPDATE_RESOLVERS] = [];
-            inst[_UPDATE_RESOLVERS].push(resolve);
+            if (!updateResolvers) updateResolvers = [];
+            updateResolvers.push(resolve);
             scheduleUpdate(inst);
         });
     };
 
-    inst[_REF_COLLECTORS] = {};
     inst.refs = function(name) {
-        if (!inst[_REF_COLLECTORS][name]) {
-            inst[_REF_COLLECTORS][name] = (node) => { inst.refs[name] = node; };
+        if (!refCollectors[name]) {
+            refCollectors[name] = (node) => { inst.refs[name] = node; };
         }
-        return inst[_REF_COLLECTORS][name];
+        return refCollectors[name];
     };
 
     inst.context = function(key, ...args) {
@@ -390,11 +370,10 @@ function attachInstanceAPI(inst) {
 
     inst.contextSelf = function(key, ...args) {
         if (inst[_IN_CONTEXT_CALL]) throw new Error('contextSelf recursion');
-        const ctx = inst[_DEF].context;
-        if (ctx && typeof ctx[key] === 'function') {
+        if (contextDef && typeof contextDef[key] === 'function') {
             inst[_IN_CONTEXT_CALL] = true;
             try {
-                const res = ctx[key].apply(inst, args);
+                const res = contextDef[key].apply(inst, args);
                 if (res !== undefined) return res;
             } finally { inst[_IN_CONTEXT_CALL] = false; }
         }
@@ -936,16 +915,6 @@ function reconcile2Component(vnode, keyMap, actualUIDs, path, namespace, ctx, ol
     inst[_PARENT_CTX] = ctx;
     inst[_NAMESPACE] = namespace;
     vnode._instance = inst;
-
-    if (!canReuse) {
-        // Первичная инициализация (только для нового instance)
-        if (def.props) { inst.props = def.props.call(inst, inst[_INCOMING_PROPS]); }
-        else { inst.props = inst[_INCOMING_PROPS]; }
-
-        inst[_IS_INITIALIZING] = true;
-        if (def.init) def.init.call(inst, inst.props);
-        inst[_IS_INITIALIZING] = false;
-    }
 
     // Рендер (общий для обоих путей).
     // Изоляция ошибок только в DEV. В PROD ошибка пробрасывается (fail fast).
