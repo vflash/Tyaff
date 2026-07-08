@@ -389,7 +389,6 @@ function makeMapKey(vnode, path) {
 // Props
 // ============================================================================
 
-const RECREATE_ATTRS = ['type', 'is'];
 const CAMEL_TO_ATTR = { className: 'class', htmlFor: 'for', tabIndex: 'tabindex' };
 
 function setHTMLProp(dom, key, value) {
@@ -814,11 +813,11 @@ function reconcile2HTML(vnode, keyMap, actualUIDs, path, namespace, ctx, oldElem
         keyMap.set(path, vnode);
 
         let shouldRecreate = false;
-        for (let ai = 0; ai < RECREATE_ATTRS.length; ai++) {
-            const attr = RECREATE_ATTRS[ai];
-            if (oldElement.props[attr] !== vnode.props[attr]) { shouldRecreate = true; break; }
-        }
-        if (oldElement.tag === 'select' && oldElement.props.multiple !== vnode.props.multiple) { shouldRecreate = true; }
+        const op = oldElement.props;
+        const np = vnode.props;
+        if (op.is !== np.is) shouldRecreate = true;
+        else if ((tag === 'input' || tag === 'button') && op.type !== np.type) shouldRecreate = true;
+        else if (tag === 'select' && op.multiple !== np.multiple) shouldRecreate = true;
 
         if (shouldRecreate) {
             unmountVdom(oldElement);
