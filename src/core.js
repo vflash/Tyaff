@@ -291,7 +291,7 @@ function attachInstanceAPI(inst) {
             const flat = [];
             reconcile2(newVdom, keyMap, actualUIDs, '', inst[_NAMESPACE], inst, flat);
 
-            if (oldVdom) {
+            if (oldVdom && (keyMap.size > actualUIDs.size)) {
                 for (const [key, oldElement] of keyMap) {
                     if (!actualUIDs.has(key)) {
                         unmountVdom(oldElement);
