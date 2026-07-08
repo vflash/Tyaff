@@ -28,21 +28,6 @@ function setDevMode(isDev) {
 // Utility functions
 // ============================================================================
 
-function escapeKey(key) {
-    const str = "" + key;
-    return str.indexOf(',') !== -1 ? str.replace(/,/g, ',,') : str;
-}
-
-function pushAll(target, source) {
-    if (source == null) return;
-    let len = target.length;
-    if (Array.isArray(source)) {
-        for (let i = 0; i < source.length; i++) target[len++] = source[i];
-    } else {
-        target[len] = source;
-    }
-}
-
 function appendAll(parent, nodes) {
     if (!nodes) return;
     for (let i = 0; i < nodes.length; i++) {
@@ -184,7 +169,8 @@ function flushRefreshResolvers() {
     if (refreshResolvers.length === 0) return;
     const resolvers = refreshResolvers;
     refreshResolvers = [];
-    for (const finish of resolvers) {
+    for (let i = 0; i < resolvers.length; i++) {
+        const finish = resolvers[i];
         try { finish(); } catch (err) { console.error('Error in refresh resolver:', err); }
     }
 }
@@ -202,10 +188,11 @@ function flushBatch() {
         }
         const toUpdate = [];
         let len = 0;
-        for (const inst of batchQueue) { toUpdate[len++] = inst; }
+        const bq = Array.from(batchQueue); for (let bi = 0; bi < bq.length; bi++) { toUpdate[len++] = bq[bi]; }
         batchQueue.clear();
         isBatchScheduled = false;
-        for (const inst of toUpdate) {
+        for (let ti = 0; ti < toUpdate.length; ti++) {
+            const inst = toUpdate[ti];
             if (IS_DEV) {
                 try { inst[_RERENDER](); } catch (err) {
                     const name = inst[_DEF]?.name || 'Component';
@@ -292,8 +279,9 @@ function attachInstanceAPI(inst) {
             reconcile2(newVdom, keyMap, actualUIDs, '', inst[_NAMESPACE], inst, flat);
 
             if (oldVdom && (keyMap.size > actualUIDs.size)) {
-                for (const [key, oldElement] of keyMap) {
+                for (const key of keyMap.keys()) {
                     if (!actualUIDs.has(key)) {
+                        const oldElement = keyMap.get(key);
                         unmountVdom(oldElement);
                         keyMap.delete(key);
                     }
@@ -385,12 +373,15 @@ function attachInstanceAPI(inst) {
 // Keys
 // ============================================================================
 
+// Возвращает UID для user key: '#' + escapeKey(key).
+// Запятая в key удваивается (,,) чтобы не ломать парсинг path.
+function keyUID(key) {
+    return '#' + (typeof key === 'string' && key.indexOf(',') !== -1 ? key.replace(/,/g, ',,') : key);
+}
+
 function makeMapKey(vnode, path) {
     const key = vnode?.props?.key;
-    if (key !== undefined) {
-        const userKey = "" + key;
-        return '#' + escapeKey(userKey);
-    }
+    if (key !== undefined) return keyUID(key);
     return path;
 }
 
@@ -425,7 +416,7 @@ function setHTMLProp(dom, key, value) {
 function applyProp(dom, key, value, namespace) {
     if (key === 'key' || key === 'ref' || key === 'children') return;
     const isSVG = namespace === SVG_NS;
-    const tag = dom.tagName;
+    const tag = dom._tagName || (dom._tagName = dom.tagName);
 
     if (!isSVG) {
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
@@ -515,7 +506,7 @@ function applyProp(dom, key, value, namespace) {
 function applyPropsDirect(dom, props, namespace) {
     if (!props) return;
     const isSVG = namespace === SVG_NS;
-    const tag = dom.tagName;
+    const tag = dom._tagName || (dom._tagName = dom.tagName);
     const isFormElement = !isSVG && (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT');
     const isSelect = tag === 'SELECT';
     for (const k in props) {
@@ -533,7 +524,7 @@ function applyProps(dom, oldProps, newProps, namespace) {
     oldProps = oldProps || {};
     newProps = newProps || {};
     const isSVG = namespace === SVG_NS;
-    const tag = dom.tagName;
+    const tag = dom._tagName || (dom._tagName = dom.tagName);
     const isFormElement = !isSVG && (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT');
 
     // Удаляем атрибуты, которых нет в новых props.
@@ -628,7 +619,7 @@ function unmountVdom(vnode, seen) {
             const d = inst[_DEF];
             if (d?.onUnmounted) d.onUnmounted.call(inst);
             if (inst[_NODES]) {
-                for (const node of inst[_NODES]) removeDOMNode(node);
+                const instNodes = inst[_NODES]; for (let ni = 0; ni < instNodes.length; ni++) removeDOMNode(instNodes[ni]);
             }
             if (inst[_VDOM]) unmountVdom(inst[_VDOM], seen);
         }
@@ -637,7 +628,7 @@ function unmountVdom(vnode, seen) {
     if (vnode.tag === Fragment) {
         // Fragment: удаляем все DOM-узлы, затем рекурсивно unmount детей
         if (vnode._nodes) {
-            for (const node of vnode._nodes) removeDOMNode(node);
+            const vnodeNodes = vnode._nodes; for (let ni = 0; ni < vnodeNodes.length; ni++) removeDOMNode(vnodeNodes[ni]);
         }
     } else if (typeof vnode.tag === 'string') {
         // HTML: удаляем сам элемент (дети удалятся браузером, но vnode нужно обойти для onUnmounted/ref)
@@ -749,7 +740,7 @@ function reconcile2(vnode, keyMap, actualUIDs, path, namespace, ctx, out) {
     let elementUID;
     const userKey = vnode.props?.key;
     if (userKey !== undefined) {
-        const keyedUID = '#' + escapeKey(userKey);
+        const keyedUID = keyUID(userKey);
         if (actualUIDs.has(keyedUID)) {
             if (IS_DEV) console.warn(`⚠️ Warning: Duplicate key "${userKey}" detected. First occurrence wins, duplicates treated as no-key.`);
             elementUID = path;
@@ -780,7 +771,8 @@ function reconcile2HTML(vnode, keyMap, actualUIDs, path, namespace, ctx, oldElem
     // Fast path: первый mount простого HTML-элемента (не SVG, не textarea).
     if (!oldElement && namespace === HTML_NS && tag !== 'svg' && tag !== 'foreignObject' && tag !== 'textarea') {
         const dom = document.createElement(tag);
-        const tagName = dom.tagName;
+        const tagName = tag === 'div' ? 'DIV' : dom.tagName;
+        dom._tagName = tagName; // кэш
         const isForm = tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT';
         const props = vnode.props;
         if (props) {
@@ -822,7 +814,8 @@ function reconcile2HTML(vnode, keyMap, actualUIDs, path, namespace, ctx, oldElem
         keyMap.set(path, vnode);
 
         let shouldRecreate = false;
-        for (const attr of RECREATE_ATTRS) {
+        for (let ai = 0; ai < RECREATE_ATTRS.length; ai++) {
+            const attr = RECREATE_ATTRS[ai];
             if (oldElement.props[attr] !== vnode.props[attr]) { shouldRecreate = true; break; }
         }
         if (oldElement.tag === 'select' && oldElement.props.multiple !== vnode.props.multiple) { shouldRecreate = true; }
@@ -857,6 +850,7 @@ function reconcile2HTML(vnode, keyMap, actualUIDs, path, namespace, ctx, oldElem
 
     vnode._el = dom;
     vnode.props?.ref?.(dom);
+    dom._tagName = dom.tagName; // кэш для applyProp/applyProps — dom.tagName дорогой
 
     if (tag === 'textarea') { vnode._nodes = []; out.push(dom); return; }
 
@@ -867,7 +861,7 @@ function reconcile2HTML(vnode, keyMap, actualUIDs, path, namespace, ctx, oldElem
 
     syncDOMChildren(dom, oldNodes, newNodes);
 
-    if (dom.tagName === 'SELECT' && 'value' in vnode.props) {
+    if (dom._tagName === 'SELECT' && 'value' in vnode.props) {
         applyProp(dom, 'value', vnode.props.value, namespace);
     }
 
@@ -1116,7 +1110,7 @@ function collectAllInstances(vnode) {
     let len = 0;
     function walk(node) {
         if (!node) return;
-        if (Array.isArray(node)) { for (const child of node) walk(child); return; }
+        if (Array.isArray(node)) { for (let ci = 0; ci < node.length; ci++) walk(node[ci]); return; }
         if (typeof node !== 'object') return;
         if (typeof node.tag === 'function' && node.tag._definition) {
             const inst = node._instance;
@@ -1124,10 +1118,11 @@ function collectAllInstances(vnode) {
             return;
         }
         if (node.tag === Portal) { const inst = node._instance; if (inst && inst[_RENDERED]) walk(inst[_RENDERED]); return; }
-        if (node.tag === Fragment) { if (Array.isArray(node._nodes)) { for (const child of node._nodes) walk(child); } return; }
-        if (node.childs) { for (const child of node.childs) walk(child); }
+        if (node.tag === Fragment) { if (Array.isArray(node._nodes)) { for (let ci = 0; ci < node._nodes.length; ci++) walk(node._nodes[ci]); } return; }
+        if (node.childs) { for (let ci = 0; ci < node.childs.length; ci++) walk(node.childs[ci]); }
     }
     walk(vnode);
+    result.reverse(); // children-first: дочерние компоненты обновляются раньше родительских
     return result;
 }
 
@@ -1189,8 +1184,9 @@ function mount(input, container) {
     reconcile2(vnode, keyMap, actualUIDs, '', HTML_NS, null, flat);
 
     // Cleanup — unmount и удаление из keyMap того, чего нет в новом дереве.
-    for (const [key, oldElement] of keyMap) {
+    for (const key of keyMap.keys()) {
         if (!actualUIDs.has(key)) {
+            const oldElement = keyMap.get(key);
             unmountVdom(oldElement);
             keyMap.delete(key);
         }
@@ -1211,7 +1207,9 @@ function mount(input, container) {
 
 function refresh() {
     const start = performance.now();
-    for (const container of mountedContainers) {
+    const _containers = Array.from(mountedContainers);
+    for (let ci = 0; ci < _containers.length; ci++) {
+        const container = _containers[ci];
         const rootInst = mountedRootInstances.get(container);
         if (rootInst) {
             // Корневой компонент — update() запустит reconcile2, который обойдёт всё поддерево.
@@ -1221,7 +1219,8 @@ function refresh() {
             const vnode = mountedTrees.get(container);
             if (!vnode) continue;
             const instances = collectAllInstances(vnode);
-            for (const inst of instances) {
+            for (let ii = 0; ii < instances.length; ii++) {
+            const inst = instances[ii];
                 try { inst.update(); } catch (err) { console.error('refresh():', inst[_DEF]?.name || 'Component', err); }
             }
         }

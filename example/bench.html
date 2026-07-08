@@ -378,15 +378,20 @@ async function benchUpdate1Row() {
             return { c, inst: v._instance };
         },
         async (ctx) => {
+            console.timeStamp("Измерение");
+
             ctx.inst.items[TARGET].text = 'UPDATED';
             await ctx.inst.update();
         },
         async (ctx) => {
+            console.timeStamp("Очистка");
             tyaffOk = ctx.c.children[0].children[TARGET].textContent === 'UPDATED';
             mount(null, ctx.c);
             arena.removeChild(ctx.c);
         }
     );
+
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
     let reactOk = false;
     const reactMs = await measureUpdateOnly(
@@ -1423,22 +1428,22 @@ async function benchMemoHit() {
 // ============================================================================
 
 const scenarios = [
-    ['Mount rows', benchMountRows],
+    //['Mount rows', benchMountRows],
     ['Update 1 row', benchUpdate1Row],
-    ['Reverse (keys)', benchReverse],
-    ['Swap first/last', benchSwapFirstLast],
-    ['Mount components', benchMountComponents],
-    ['Deep tree', benchDeepTree],
-    ['Move between parents', benchMoveBetweenParents],
-    ['Move heavy (10 children)', benchMoveBetweenParentsHeavy],
-    ['Clear + remount', benchClearRemount],
-    ['Update all rows', benchUpdateAllRows],
-    ['Insert middle', benchInsertMiddle],
-    ['Insert comp mid', benchInsertCompMiddle],
-    ['Insert comp mid memo', benchInsertCompMiddleMemo],
-    ['Memo skip', benchMemoSkip],
-    ['No memo (baseline)', benchNoMemo],
-    ['Memo hit (1 changed)', benchMemoHit],
+    //['Reverse (keys)', benchReverse],
+    //['Swap first/last', benchSwapFirstLast],
+    //['Mount components', benchMountComponents],
+    //['Deep tree', benchDeepTree],
+    //['Move between parents', benchMoveBetweenParents],
+    //['Move heavy (10 children)', benchMoveBetweenParentsHeavy],
+    //['Clear + remount', benchClearRemount],
+    //['Update all rows', benchUpdateAllRows],
+    //['Insert middle', benchInsertMiddle],
+    //['Insert comp mid', benchInsertCompMiddle],
+    //['Insert comp mid memo', benchInsertCompMiddleMemo],
+    //['Memo skip', benchMemoSkip],
+    //['No memo (baseline)', benchNoMemo],
+    //['Memo hit (1 changed)', benchMemoHit],
 ];
 
 let running = false;
