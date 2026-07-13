@@ -9,7 +9,8 @@ const XLINK_NS = 'http://www.w3.org/1999/xlink';
 const HTML_NS = 'http://www.w3.org/1999/xhtml';
 
 // Шара для пустых результатов reconcile2 — caller'ы только читают, не мутируют.
-const EMPTY = [];
+const EMPTY_ARRAY = Object.freeze([]);
+const EMPTY_PROPS = Object.freeze({});
 
 // Заглушка для actualUIDs когда duplicate detection не нужен (первый mount / oldVdom null).
 // has() всегда false — duplicate keys не детектятся (warn только в dev, на первом render допустимо пропустить).
@@ -34,6 +35,19 @@ function appendAll(parent, nodes) {
         parent.appendChild(nodes[i]);
     }
 }
+
+function createElement(namespace, tag) {
+    const dom = namespace === SVG_NS ? document.createElementNS(SVG_NS, tag) : document.createElement(tag);
+    dom._tagName = (tag === 'div' ? 'DIV'
+        : tag === 'td' ? 'TD'
+        : tag === 'tr' ? 'TR'
+        : tag === 'span' ? 'SPAN'
+        : tag === 'tbody' ? 'TBODY'
+        : tag === 'table' ? 'TABLE'
+        : dom.tagName
+    );
+    return dom;
+};
 
 function collectDOMNodes(childs) {
     const result = [];
@@ -85,7 +99,7 @@ function h(type, props, ...children) {
         }
         // else: vnode — уже на месте, не трогаем
     }
-    return { tag: type, props: props || {}, childs: children };
+    return { tag: type, props: props || EMPTY_PROPS, childs: children };
 }
 
 function createPortal(children, containerGetter) {
@@ -133,13 +147,14 @@ function Component(definition) {
         this[_DEF] = definition;
         this[_PARENT_CTX] = null;
         this[_INCOMING_PROPS] = null;
-        this.props = {};
         this[_VDOM] = null;
         this[_NODES] = [];
         this[_IS_MOUNTED] = false;
         this[_IN_CONTEXT_CALL] = false;
         this[_NAMESPACE] = HTML_NS;
         this[_HAS_CHILD_COMPS] = false;
+
+        this.props = EMPTY_PROPS;
     }
     ComponentClass._definition = definition;
     return ComponentClass;
@@ -269,8 +284,7 @@ function attachInstanceAPI(inst) {
             isRendering = true;
             try { newVdom = renderFn.call(inst, inst.props); } finally { isRendering = false; }
 
-            const actualUIDs = oldVdom ? new Set() : (IS_DEV ? new Set() : NO_ACTUAL_UIDS);
-            const oldNodes = inst[_NODES];
+            const actualUIDs = oldVdom || IS_DEV ? new Set() : NO_ACTUAL_UIDS;
             inst[_HAS_CHILD_COMPS] = false;
             const prevQueue = mountedQueue;
             mountedQueue = [];
@@ -415,7 +429,7 @@ function setHTMLProp(dom, key, value) {
 function applyProp(dom, key, value, namespace) {
     if (key === 'key' || key === 'ref' || key === 'children') return;
     const isSVG = namespace === SVG_NS;
-    const tag = dom._tagName || (dom._tagName = dom.tagName);
+    const tag = dom._tagName;
 
     if (!isSVG) {
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
@@ -505,7 +519,7 @@ function applyProp(dom, key, value, namespace) {
 function applyPropsDirect(dom, props, namespace) {
     if (!props) return;
     const isSVG = namespace === SVG_NS;
-    const tag = dom._tagName || (dom._tagName = dom.tagName);
+    const tag = dom._tagName;
     const isFormElement = !isSVG && (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT');
     const isSelect = tag === 'SELECT';
     for (const k in props) {
@@ -520,10 +534,10 @@ function applyPropsDirect(dom, props, namespace) {
 }
 
 function applyProps(dom, oldProps, newProps, namespace) {
-    oldProps = oldProps || {};
-    newProps = newProps || {};
+    oldProps = oldProps || EMPTY_PROPS;
+    newProps = newProps || EMPTY_PROPS;
     const isSVG = namespace === SVG_NS;
-    const tag = dom._tagName || (dom._tagName = dom.tagName);
+    const tag = dom._tagName;
     const isFormElement = !isSVG && (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT');
 
     // Удаляем атрибуты, которых нет в новых props.
@@ -715,10 +729,9 @@ function reconcile2(vnode, keyMap, actualUIDs, path, namespace, ctx, out) {
         if (oldElement && oldElement._text !== undefined) {
             if (oldElement._text !== vnode._text) {
                 oldElement._el.nodeValue = vnode._text;
+                oldElement._text = vnode._text;
             }
-            vnode._el = oldElement._el;
-            keyMap.set(elementUID, vnode);
-            out.push(vnode._el);
+            out.push(oldElement._el);
             return;
         }
 
@@ -769,9 +782,8 @@ function reconcile2HTML(vnode, keyMap, actualUIDs, path, namespace, ctx, oldElem
 
     // Fast path: первый mount простого HTML-элемента (не SVG, не textarea).
     if (!oldElement && namespace === HTML_NS && tag !== 'svg' && tag !== 'foreignObject' && tag !== 'textarea') {
-        const dom = document.createElement(tag);
-        const tagName = tag === 'div' ? 'DIV' : dom.tagName;
-        dom._tagName = tagName; // кэш
+        const dom = createElement(null, tag);
+        const tagName = dom._tagName;
         const isForm = tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT';
         const props = vnode.props;
         if (props) {
@@ -792,7 +804,7 @@ function reconcile2HTML(vnode, keyMap, actualUIDs, path, namespace, ctx, oldElem
         const newNodes = [];
         reconcile2(vnode.childs, keyMap, actualUIDs, path, namespace, ctx, newNodes);
         vnode._nodes = newNodes;
-        syncDOMChildren(dom, EMPTY, newNodes);
+        syncDOMChildren(dom, EMPTY_ARRAY, newNodes);
 
         if (tagName === 'SELECT' && props && 'value' in props) {
             applyProp(dom, 'value', props.value, namespace);
@@ -821,27 +833,23 @@ function reconcile2HTML(vnode, keyMap, actualUIDs, path, namespace, ctx, oldElem
 
         if (shouldRecreate) {
             unmountVdom(oldElement);
-            dom = namespace === SVG_NS
-                ? document.createElementNS(SVG_NS, vnode.tag)
-                : document.createElement(vnode.tag);
+            dom = createElement(namespace, vnode.tag)
             applyPropsDirect(dom, vnode.props, namespace);
             oldNodes = [];
         } else {
             const oldProps = oldElement.props;
             const newProps = vnode.props;
-            let propsChanged = false;
             if (oldProps !== newProps) {
+                let propsChanged = false;
                 for (const k in oldProps) { if (!(k in newProps) || oldProps[k] !== newProps[k]) { propsChanged = true; break; } }
                 if (!propsChanged) { for (const k in newProps) { if (!(k in oldProps)) { propsChanged = true; break; } } }
-            }
-            if (propsChanged) {
-                applyProps(dom, oldElement.props, vnode.props, namespace);
+                if (propsChanged) {
+                    applyProps(dom, oldElement.props, vnode.props, namespace);
+                }
             }
         }
     } else {
-        dom = namespace === SVG_NS
-            ? document.createElementNS(SVG_NS, vnode.tag)
-            : document.createElement(vnode.tag);
+        dom = createElement(namespace, vnode.tag)
         applyPropsDirect(dom, vnode.props, namespace);
         if (oldElement) unmountVdom(oldElement);
         keyMap.set(path, vnode);
@@ -849,13 +857,36 @@ function reconcile2HTML(vnode, keyMap, actualUIDs, path, namespace, ctx, oldElem
 
     vnode._el = dom;
     vnode.props?.ref?.(dom);
-    dom._tagName = dom.tagName; // кэш для applyProp/applyProps — dom.tagName дорогой
 
     if (tag === 'textarea') { vnode._nodes = []; out.push(dom); return; }
 
+    // Fast path: single text child, old also had single text child.
+    // Common pattern: <div key={id}>text</div> в list rows.
+    // Скипает reconcile2 call, syncDOMChildren, SELECT value check.
+    if (vnode.childs && vnode.childs.length === 1 && oldNodes.length === 1) {
+        const onlyChild = vnode.childs[0];
+        if (onlyChild && onlyChild._text !== undefined) {
+            const textPath = path + ',0';
+            const oldChild = keyMap.get(textPath);
+            if (oldChild && oldChild._text !== undefined) {
+                const text = onlyChild._text;
+                if (oldChild._text !== text) {
+                    oldChild._el.nodeValue = text;
+                    oldChild._text = text;
+                }
+                actualUIDs.add(textPath);
+                vnode._nodes = oldNodes;
+                out.push(dom);
+                return;
+            }
+        }
+    }
+
     const childNamespace = isForeignObject ? HTML_NS : namespace;
     const newNodes = [];
-    reconcile2(vnode.childs, keyMap, actualUIDs, path, childNamespace, ctx, newNodes);
+    if (vnode.childs?.length || !Array.isArray(vnode.childs)) {
+        reconcile2(vnode.childs, keyMap, actualUIDs, path, childNamespace, ctx, newNodes);
+    };
     vnode._nodes = newNodes;
 
     syncDOMChildren(dom, oldNodes, newNodes);

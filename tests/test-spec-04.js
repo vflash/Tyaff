@@ -1,6 +1,12 @@
 // ============================================================================
-// Node.js тесты для VDOM библиотеки tyaff — Часть 4: продвинутые механизмы
-// Запуск: node --test tests/test-node-04.js
+// Spec-тесты для VDOM библиотеки tyaff — Часть 4: продвинутые механизмы
+//
+// Spec-тесты проверяют observable behavior (DOM API, instance identity, lifecycle
+// hooks) — то что пользователь может наблюдать через публичный API библиотеки.
+// Тесты деталей реализации (internal caches, frozen shared references) живут
+// в test-dev-*.js.
+//
+// Запуск: node --test tests/test-spec-04.js
 // ============================================================================
 
 import { test, describe } from 'node:test';
@@ -615,4 +621,4 @@ if (hasDOM) {
     });
 }
 
-console.log('\n✅ Test-node-04 инициализирован (17 тестов)\n');
+console.log('\n✅ Test-spec-04 инициализирован (17 тестов)\n');

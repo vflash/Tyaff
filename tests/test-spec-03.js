@@ -1,6 +1,12 @@
 // ============================================================================
-// UI интеграционные паттерны
-// Запуск: node --test tests/test-node-03.js
+// Spec-тесты для VDOM библиотеки tyaff — Часть 3: UI интеграционные паттерны
+//
+// Spec-тесты проверяют observable behavior (DOM API, instance identity, lifecycle
+// hooks) — то что пользователь может наблюдать через публичный API библиотеки.
+// Тесты деталей реализации (internal caches, frozen shared references) живут
+// в test-dev-*.js.
+//
+// Запуск: node --test tests/test-spec-03.js
 // ============================================================================
 
 import { test, describe } from 'node:test';
@@ -840,4 +846,4 @@ if (hasDOM) {
 
 }
 
-console.log('\n✅ Test-node-03 инициализирован (8 тестов)\n');
+console.log('\n✅ Test-spec-03 инициализирован (8 тестов)\n');

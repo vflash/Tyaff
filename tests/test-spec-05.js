@@ -1,7 +1,13 @@
 // ============================================================================
-// Node.js тесты для VDOM библиотеки tyaff — Часть 5
+// Spec-тесты для VDOM библиотеки tyaff — Часть 5
 // update() Promise<boolean> + Key identifiers
-// Запуск: node --test tests/test-node-05.js
+//
+// Spec-тесты проверяют observable behavior (DOM API, instance identity, lifecycle
+// hooks) — то что пользователь может наблюдать через публичный API библиотеки.
+// Тесты деталей реализации (internal caches, frozen shared references) живут
+// в test-dev-*.js.
+//
+// Запуск: node --test tests/test-spec-05.js
 // ============================================================================
 
 import { test, describe } from 'node:test';
@@ -558,4 +564,4 @@ if (hasDOM) {
     });
 }
 
-console.log('\n✅ Test-node-05 инициализирован (18 тестов)\n');
+console.log('\n✅ Test-spec-05 инициализирован (18 тестов)\n');

@@ -8,12 +8,7 @@
     "url": "https://github.com/vflash/tyaff/issues"
   },
   "scripts": {
-    "test": "node --test tests/test-node-*.js",
-    "test:01": "node --test tests/test-node-01.js",
-    "test:02": "node --test tests/test-node-02.js",
-    "test:03": "node --test tests/test-node-03.js",
-    "test:04": "node --test tests/test-node-04.js",
-    "test:05": "node --test tests/test-node-05.js"
+    "test": "node --test tests/test-spec-*.js tests/test-dev-*.js"
   },
   "keywords": [
     "js",

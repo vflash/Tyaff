@@ -1,7 +1,13 @@
 // ============================================================================
-// Node.js тесты для VDOM библиотеки tyaff — Часть 1
+// Spec-тесты для VDOM библиотеки tyaff — Часть 1
 // Базовые возможности: h(), Component, lifecycle, reconciliation
-// Запуск: node --test tests/test-node-01.js
+//
+// Spec-тесты проверяют observable behavior (DOM API, instance identity, lifecycle
+// hooks) — то что пользователь может наблюдать через публичный API библиотеки.
+// Тесты деталей реализации (internal caches, frozen shared references) живут
+// в test-dev-*.js.
+//
+// Запуск: node --test tests/test-spec-01.js
 // ============================================================================
 
 import { test, describe } from 'node:test';
@@ -902,4 +908,4 @@ if (hasDOM) {
     });
 }
 
-console.log('\n✅ Test-node-01 инициализирован\n');
+console.log('\n✅ Test-spec-01 инициализирован\n');

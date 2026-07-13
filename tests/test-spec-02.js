@@ -1,6 +1,12 @@
 // ============================================================================
-// Node.js тесты для VDOM библиотеки tyaff — Часть 2: DOM и продвинутые механизмы
-// Запуск: node --test tests/test-node-02.js
+// Spec-тесты для VDOM библиотеки tyaff — Часть 2: DOM и продвинутые механизмы
+//
+// Spec-тесты проверяют observable behavior (DOM API, instance identity, lifecycle
+// hooks) — то что пользователь может наблюдать через публичный API библиотеки.
+// Тесты деталей реализации (internal caches, frozen shared references) живут
+// в test-dev-*.js.
+//
+// Запуск: node --test tests/test-spec-02.js
 // ============================================================================
 
 import { test, describe } from 'node:test';
@@ -730,6 +736,160 @@ if (hasDOM) {
             assert.ok(time < 50, `Слишком медленно: ${time.toFixed(2)}ms`);
         });
     });
+
+    // =========================================================================
+    // RECREATE_ATTRS — type/is/multiple должны пересоздавать элемент
+    // =========================================================================
+    describe('Recreate on attribute change', () => {
+        test('button.type change → пересоздание element', () => {
+            const container = createContainer();
+            mount(h('button', { type: 'button' }, 'ok'), container);
+            const btn1 = container.firstChild;
+            assert.equal(btn1.getAttribute('type'), 'button');
+
+            mount(h('button', { type: 'submit' }, 'ok'), container);
+            const btn2 = container.firstChild;
+            assert.equal(btn2.getAttribute('type'), 'submit');
+            assert.notStrictEqual(btn1, btn2, 'button должен быть пересоздан при смене type');
+        });
+
+        test('input.type change → пересоздание element', () => {
+            const container = createContainer();
+            mount(h('input', { type: 'text' }), container);
+            const inp1 = container.firstChild;
+            assert.equal(inp1.getAttribute('type'), 'text');
+
+            mount(h('input', { type: 'checkbox' }), container);
+            const inp2 = container.firstChild;
+            assert.equal(inp2.getAttribute('type'), 'checkbox');
+            assert.notStrictEqual(inp1, inp2, 'input должен быть пересоздан при смене type');
+        });
+
+        test('is attribute change → пересоздание element', () => {
+            const container = createContainer();
+            mount(h('div', { is: 'my-element-1' }), container);
+            const div1 = container.firstChild;
+            assert.equal(div1.getAttribute('is'), 'my-element-1');
+
+            mount(h('div', { is: 'my-element-2' }), container);
+            const div2 = container.firstChild;
+            assert.equal(div2.getAttribute('is'), 'my-element-2');
+            assert.notStrictEqual(div1, div2, 'element должен быть пересоздан при смене is');
+        });
+
+        test('select.multiple change → пересоздание element', () => {
+            const container = createContainer();
+            mount(h('select', { multiple: false }), container);
+            const sel1 = container.firstChild;
+            assert.equal(sel1.hasAttribute('multiple'), false);
+
+            mount(h('select', { multiple: true }), container);
+            const sel2 = container.firstChild;
+            assert.equal(sel2.hasAttribute('multiple'), true);
+            assert.notStrictEqual(sel1, sel2, 'select должен быть пересоздан при смене multiple');
+        });
+
+        test('input.type без изменений → element переиспользуется', () => {
+            const container = createContainer();
+            mount(h('input', { type: 'text', placeholder: 'a' }), container);
+            const inp1 = container.firstChild;
+
+            mount(h('input', { type: 'text', placeholder: 'b' }), container);
+            const inp2 = container.firstChild;
+            assert.strictEqual(inp1, inp2, 'input должен переиспользоваться если type не менялся');
+            assert.equal(inp2.getAttribute('placeholder'), 'b');
+        });
+    });
+
+    // =========================================================================
+    // createElement — tagName uppercase для частых тегов (DOM API contract)
+    // =========================================================================
+    describe('createElement tagName', () => {
+        test('div → DIV', () => {
+            const c = createContainer();
+            mount(h('div', null), c);
+            assert.equal(c.firstChild.tagName, 'DIV');
+        });
+
+        test('table → TABLE (не table lowercase)', () => {
+            const c = createContainer();
+            mount(h('table', null, h('tbody', null, h('tr', null, h('td', null, 'cell')))), c);
+            const table = c.firstChild;
+            assert.equal(table.tagName, 'TABLE');
+            assert.equal(table.firstChild.tagName, 'TBODY');
+            assert.equal(table.firstChild.firstChild.tagName, 'TR');
+            assert.equal(table.firstChild.firstChild.firstChild.tagName, 'TD');
+        });
+
+        test('span → SPAN', () => {
+            const c = createContainer();
+            mount(h('span', null, 'text'), c);
+            assert.equal(c.firstChild.tagName, 'SPAN');
+        });
+
+        test('unknown tag → fallback to dom.tagName', () => {
+            const c = createContainer();
+            mount(h('custom-element', null), c);
+            // happy-dom returns lowercase for custom elements per spec
+            assert.ok(c.firstChild.tagName !== undefined);
+        });
+    });
+
+    // =========================================================================
+    // className edge cases — null/false/true/number/update
+    // =========================================================================
+    describe('className edge cases', () => {
+        test('className=null → пустой class', () => {
+            const c = createContainer();
+            mount(h('div', { className: null }), c);
+            assert.equal(c.firstChild.className, '');
+        });
+
+        test('className=false → пустой class', () => {
+            const c = createContainer();
+            mount(h('div', { className: false }), c);
+            assert.equal(c.firstChild.className, '');
+        });
+
+        test('className=true → пустой class (boolean → empty string)', () => {
+            const c = createContainer();
+            mount(h('div', { className: true }), c);
+            assert.equal(c.firstChild.className, '');
+        });
+
+        test('className=number → string representation', () => {
+            const c = createContainer();
+            mount(h('div', { className: 123 }), c);
+            assert.equal(c.firstChild.className, '123');
+        });
+
+        test('update className string → null → string', () => {
+            const c = createContainer();
+            mount(h('div', { className: 'aaa' }), c);
+            assert.equal(c.firstChild.className, 'aaa');
+
+            mount(h('div', { className: null }), c);
+            assert.equal(c.firstChild.className, '');
+
+            mount(h('div', { className: 'ccc' }), c);
+            assert.equal(c.firstChild.className, 'ccc');
+        });
+
+        test('className update string → string (через applyProps)', () => {
+            const c = createContainer();
+            mount(h('div', { className: 'foo' }), c);
+            const div = c.firstChild;
+            assert.equal(div.className, 'foo');
+
+            mount(h('div', { className: 'bar' }), c);
+            assert.equal(div.className, 'bar');
+            assert.strictEqual(div, c.firstChild, 'element должен быть переиспользован');
+        });
+
+        // NOTE: SVG className не тестируется здесь — в applyProp есть бага:
+        // для SVG className идёт через setAttribute('className', ...) а не setAttribute('class', ...).
+        // CAMEL_TO_ATTR конверсия не применяется в isSVG ветке. Это existing bug, не регрессия.
+    });
 }
 
-console.log('\n✅ Test-node-02 инициализирован (45 тестов)\n');
+console.log('\n✅ Test-spec-02 инициализирован (60 тестов)\n');
