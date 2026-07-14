@@ -238,7 +238,7 @@ function attachInstanceAPI(inst) {
     const refCollectors = {};
     const keyMap = new Map();
 
-    inst[_RERENDER] = function() {
+    inst[_RERENDER] = inst._rerender = function() {
         if (isUpdating) return;
         isUpdating = true;
         try { doRerender(); } catch (err) {
@@ -844,8 +844,15 @@ function reconcile2HTML(vnode, keyMap, version, path, namespace, ctx, oldElement
             const newProps = vnode.props;
             if (oldProps !== newProps) {
                 let propsChanged = false;
-                for (const k in oldProps) { if (!(k in newProps) || oldProps[k] !== newProps[k]) { propsChanged = true; break; } }
-                if (!propsChanged) { for (const k in newProps) { if (!(k in oldProps)) { propsChanged = true; break; } } }
+                let count1 = 0, count2 = 0;
+                for (const key in oldProps) {
+                    count1++;
+                    if (newProps[key] !== oldProps[key]) { propsChanged = true; break; }
+                }
+                if (!propsChanged) {
+                    for (const key in newProps) count2++;
+                    propsChanged = count1 !== count2;
+                }
                 if (propsChanged) {
                     applyProps(dom, oldElement.props, vnode.props, namespace);
                 }
