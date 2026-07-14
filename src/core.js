@@ -12,12 +12,11 @@ const HTML_NS = 'http://www.w3.org/1999/xhtml';
 const EMPTY_ARRAY = Object.freeze([]);
 const EMPTY_PROPS = Object.freeze({});
 
-// Заглушка для actualUIDs когда duplicate detection не нужен (первый mount / oldVdom null).
-// has() всегда false — duplicate keys не детектятся (warn только в dev, на первом render допустимо пропустить).
-const NO_ACTUAL_UIDS = {
-    add() { return this; },
-    has() { return false; }
-};
+// Version counter для cleanup вместо Set<actualUIDs>.
+// Каждый render инкрементирует reconcileVersion, vnode помечается _v = reconcileVersion.
+// Cleanup сравнивает _v старых элементов с текущей версией — устаревшие unmount.
+// Быстрее Set (property write/read vs hash+bucket) и не требует Set allocation per render.
+let reconcileVersion = 0;
 
 let IS_DEV = typeof process !== 'undefined' && process.env.NODE_ENV !== 'production';
 
@@ -284,22 +283,25 @@ function attachInstanceAPI(inst) {
             isRendering = true;
             try { newVdom = renderFn.call(inst, inst.props); } finally { isRendering = false; }
 
-            const actualUIDs = oldVdom || IS_DEV ? new Set() : NO_ACTUAL_UIDS;
+            const version = ++reconcileVersion;
+            keyMap._count = 0;
             inst[_HAS_CHILD_COMPS] = false;
             const prevQueue = mountedQueue;
             mountedQueue = [];
 
             const flat = [];
-            reconcile2(newVdom, keyMap, actualUIDs, '', inst[_NAMESPACE], inst, flat);
+            reconcile2(newVdom, keyMap, version, '', inst[_NAMESPACE], inst, flat);
 
-            if (oldVdom && (keyMap.size > actualUIDs.size)) {
-                for (const key of keyMap.keys()) {
-                    if (!actualUIDs.has(key)) {
-                        const oldElement = keyMap.get(key);
+            // Cleanup только если в keyMap есть untouched oldElements.
+            // keyMap._count = количество keyMap.set calls в этом render (без reuse).
+            // Если keyMap.size > _count — есть старые элементы не переиспользованные/не заменённые.
+            if (oldVdom && keyMap.size > keyMap._count) {
+                keyMap.forEach((oldElement, key) => {
+                    if (oldElement._v !== version) {
                         unmountVdom(oldElement);
                         keyMap.delete(key);
                     }
-                }
+                });
             }
 
             inst[_NODES] = flat;
@@ -708,7 +710,7 @@ function syncDOMChildren(parentDOM, oldNodes, newNodes) {
 // Reconcile2 — рекурсивный алгоритм с out-параметром
 // ============================================================================
 
-function reconcile2(vnode, keyMap, actualUIDs, path, namespace, ctx, out) {
+function reconcile2(vnode, keyMap, version, path, namespace, ctx, out) {
     if (vnode == null) return;
 
     if (Array.isArray(vnode)) {
@@ -716,14 +718,13 @@ function reconcile2(vnode, keyMap, actualUIDs, path, namespace, ctx, out) {
         if (len === 0) return;
         const prefix = path + ',';
         for (let i = 0; i < len; i++) {
-            reconcile2(vnode[i], keyMap, actualUIDs, prefix + i, namespace, ctx, out);
+            reconcile2(vnode[i], keyMap, version, prefix + i, namespace, ctx, out);
         }
         return;
     }
 
     if (vnode._text !== undefined) {
         const elementUID = path;
-        actualUIDs.add(elementUID);
         const oldElement = keyMap.get(elementUID);
 
         if (oldElement && oldElement._text !== undefined) {
@@ -731,6 +732,7 @@ function reconcile2(vnode, keyMap, actualUIDs, path, namespace, ctx, out) {
                 oldElement._el.nodeValue = vnode._text;
                 oldElement._text = vnode._text;
             }
+            oldElement._v = version;
             out.push(oldElement._el);
             return;
         }
@@ -741,19 +743,21 @@ function reconcile2(vnode, keyMap, actualUIDs, path, namespace, ctx, out) {
 
         const t = document.createTextNode(vnode._text);
         vnode._el = t;
+        vnode._v = version;
+        keyMap._count++;
         keyMap.set(elementUID, vnode);
         out.push(t);
         return;
     }
 
-    // Вычисляем elementUID. Если у vnode есть user key и он уже в actualUIDs —
-    // duplicate key. Первый key выигрывает, дубликат получает path-based UID.
-    // Warning в dev режиме — здесь же, отдельный проход не нужен.
+    // Вычисляем elementUID. duplicate key detection через _v field:
+    // если keyed element уже есть в keyMap с _v === version — он уже использован в этом render.
     let elementUID;
     const userKey = vnode.props?.key;
     if (userKey !== undefined) {
         const keyedUID = keyUID(userKey);
-        if (actualUIDs.has(keyedUID)) {
+        const existing = keyMap.get(keyedUID);
+        if (existing && existing._v === version) {
             if (IS_DEV) console.warn(`⚠️ Warning: Duplicate key "${userKey}" detected. First occurrence wins, duplicates treated as no-key.`);
             elementUID = path;
         } else {
@@ -762,22 +766,21 @@ function reconcile2(vnode, keyMap, actualUIDs, path, namespace, ctx, out) {
     } else {
         elementUID = path;
     }
-    actualUIDs.add(elementUID);
 
     const tag = vnode.tag;
     const oldElement = keyMap.get(elementUID);
 
     // Порядок проверок: string (чаще всего) → Fragment → Component → Portal
-    if (typeof tag === 'string') { reconcile2HTML(vnode, keyMap, actualUIDs, elementUID, namespace, ctx, oldElement, out); return; }
-    if (tag === Fragment) { reconcile2Fragment(vnode, keyMap, actualUIDs, elementUID, namespace, ctx, oldElement, out); return; }
+    if (typeof tag === 'string') { reconcile2HTML(vnode, keyMap, version, elementUID, namespace, ctx, oldElement, out); return; }
+    if (tag === Fragment) { reconcile2Fragment(vnode, keyMap, version, elementUID, namespace, ctx, oldElement, out); return; }
     if (typeof tag === 'function' && tag._definition) {
         if (ctx) ctx[_HAS_CHILD_COMPS] = true;
-        reconcile2Component(vnode, keyMap, actualUIDs, elementUID, namespace, ctx, oldElement, out); return;
+        reconcile2Component(vnode, keyMap, version, elementUID, namespace, ctx, oldElement, out); return;
     }
-    if (tag === Portal) { reconcile2Portal(vnode, keyMap, actualUIDs, elementUID, namespace, ctx, oldElement, out); return; }
+    if (tag === Portal) { reconcile2Portal(vnode, keyMap, version, elementUID, namespace, ctx, oldElement, out); return; }
 }
 
-function reconcile2HTML(vnode, keyMap, actualUIDs, path, namespace, ctx, oldElement, out) {
+function reconcile2HTML(vnode, keyMap, version, path, namespace, ctx, oldElement, out) {
     const tag = vnode.tag;
 
     // Fast path: первый mount простого HTML-элемента (не SVG, не textarea).
@@ -798,11 +801,11 @@ function reconcile2HTML(vnode, keyMap, actualUIDs, path, namespace, ctx, oldElem
             }
         }
         vnode._el = dom;
-        keyMap.set(path, vnode);
+        vnode._v = version; keyMap._count++; keyMap.set(path, vnode);
         props?.ref?.(dom);
 
         const newNodes = [];
-        reconcile2(vnode.childs, keyMap, actualUIDs, path, namespace, ctx, newNodes);
+        reconcile2(vnode.childs, keyMap, version, path, namespace, ctx, newNodes);
         vnode._nodes = newNodes;
         syncDOMChildren(dom, EMPTY_ARRAY, newNodes);
 
@@ -822,7 +825,7 @@ function reconcile2HTML(vnode, keyMap, actualUIDs, path, namespace, ctx, oldElem
     if (oldElement && typeof oldElement.tag === 'string' && oldElement.tag === vnode.tag) {
         dom = oldElement._el;
         oldNodes = oldElement._nodes || [];
-        keyMap.set(path, vnode);
+        vnode._v = version; keyMap._count++; keyMap.set(path, vnode);
 
         let shouldRecreate = false;
         const op = oldElement.props;
@@ -852,7 +855,7 @@ function reconcile2HTML(vnode, keyMap, actualUIDs, path, namespace, ctx, oldElem
         dom = createElement(namespace, vnode.tag)
         applyPropsDirect(dom, vnode.props, namespace);
         if (oldElement) unmountVdom(oldElement);
-        keyMap.set(path, vnode);
+        vnode._v = version; keyMap._count++; keyMap.set(path, vnode);
     }
 
     vnode._el = dom;
@@ -874,7 +877,7 @@ function reconcile2HTML(vnode, keyMap, actualUIDs, path, namespace, ctx, oldElem
                     oldChild._el.nodeValue = text;
                     oldChild._text = text;
                 }
-                actualUIDs.add(textPath);
+                oldChild._v = version;
                 vnode._nodes = oldNodes;
                 out.push(dom);
                 return;
@@ -885,7 +888,7 @@ function reconcile2HTML(vnode, keyMap, actualUIDs, path, namespace, ctx, oldElem
     const childNamespace = isForeignObject ? HTML_NS : namespace;
     const newNodes = [];
     if (vnode.childs?.length || !Array.isArray(vnode.childs)) {
-        reconcile2(vnode.childs, keyMap, actualUIDs, path, childNamespace, ctx, newNodes);
+        reconcile2(vnode.childs, keyMap, version, path, childNamespace, ctx, newNodes);
     };
     vnode._nodes = newNodes;
 
@@ -898,13 +901,13 @@ function reconcile2HTML(vnode, keyMap, actualUIDs, path, namespace, ctx, oldElem
     out.push(dom);
 }
 
-function reconcile2Fragment(vnode, keyMap, actualUIDs, path, namespace, ctx, oldElement, out) {
+function reconcile2Fragment(vnode, keyMap, version, path, namespace, ctx, oldElement, out) {
     const hasKey = vnode.props?.key !== undefined;
 
     if (hasKey && oldElement && oldElement.tag === Fragment) {
-        keyMap.set(path, vnode);
+        vnode._v = version; keyMap._count++; keyMap.set(path, vnode);
         const newNodes = [];
-        reconcile2(vnode.childs, keyMap, actualUIDs, path, namespace, ctx, newNodes);
+        reconcile2(vnode.childs, keyMap, version, path, namespace, ctx, newNodes);
         vnode._nodes = newNodes;
         vnode._instance = oldElement._instance;
         for (let i = 0; i < newNodes.length; i++) out.push(newNodes[i]);
@@ -913,13 +916,13 @@ function reconcile2Fragment(vnode, keyMap, actualUIDs, path, namespace, ctx, old
             unmountVdom(oldElement);
         }
         const nodes = [];
-        reconcile2(vnode.childs, keyMap, actualUIDs, path, namespace, ctx, nodes);
+        reconcile2(vnode.childs, keyMap, version, path, namespace, ctx, nodes);
         vnode._nodes = nodes;
         for (let i = 0; i < nodes.length; i++) out.push(nodes[i]);
     }
 }
 
-function reconcile2Component(vnode, keyMap, actualUIDs, path, namespace, ctx, oldElement, out) {
+function reconcile2Component(vnode, keyMap, version, path, namespace, ctx, oldElement, out) {
     const def = vnode.tag._definition;
 
     const canReuse = oldElement && oldElement.tag === vnode.tag && oldElement._instance;
@@ -934,7 +937,7 @@ function reconcile2Component(vnode, keyMap, actualUIDs, path, namespace, ctx, ol
     }
 
     // Общий setup для обоих путей (reuse и create)
-    keyMap.set(path, vnode);
+    vnode._v = version; keyMap._count++; keyMap.set(path, vnode);
     inst[_INCOMING_PROPS] = buildIncomingProps(vnode.props, vnode.childs);
     inst[_PARENT_CTX] = ctx;
     inst[_NAMESPACE] = namespace;
@@ -970,15 +973,15 @@ function reconcile2Component(vnode, keyMap, actualUIDs, path, namespace, ctx, ol
 }
 
 
-function reconcilePortalChildren(inst, vnode, keyMap, actualUIDs, path, namespace, ctx) {
+function reconcilePortalChildren(inst, vnode, keyMap, version, path, namespace, ctx) {
     const container = vnode.props.containerGetter();
 
     // Case 1: первый mount — контейнера ещё не было, теперь есть.
-    // Дети портала используют родительский keyMap/actualUIDs (portal не изолирует детей).
+    // Дети портала используют родительский keyMap/version (portal не изолирует детей).
     if (!inst[_CONTAINER] && container) {
         inst[_CONTAINER] = container;
         const childNodes = [];
-        reconcile2(vnode.childs, keyMap, actualUIDs, path, namespace, ctx, childNodes);
+        reconcile2(vnode.childs, keyMap, version, path, namespace, ctx, childNodes);
         inst[_RENDERED] = vnode.childs;
         inst[_NODES] = childNodes;
         appendAll(container, inst[_NODES]);
@@ -986,7 +989,7 @@ function reconcilePortalChildren(inst, vnode, keyMap, actualUIDs, path, namespac
     }
 
     // Case 2: контейнер исчез — размонтируем контент.
-    // unmountVdom удалит vnode, родительский cleanup уберёт из keyMap (по actualUIDs).
+    // unmountVdom удалит vnode, родительский cleanup уберёт из keyMap (по version).
     if (inst[_CONTAINER] && !container) {
         if (inst[_RENDERED]) unmountVdom(inst[_RENDERED]);
         inst[_RENDERED] = null;
@@ -1011,18 +1014,18 @@ function reconcilePortalChildren(inst, vnode, keyMap, actualUIDs, path, namespac
         }
     }
 
-    // Reconcile детей портала с родительским keyMap/actualUIDs.
-    // reconcile2 заполнит keyMap/actualUIDs, cleanup сделает родитель.
+    // Reconcile детей портала с родительским keyMap/version.
+    // reconcile2 заполнит keyMap/version, cleanup сделает родитель.
     const oldNodes = inst[_NODES];
     const newNodes = [];
-    reconcile2(vnode.childs, keyMap, actualUIDs, path, namespace, ctx, newNodes);
+    reconcile2(vnode.childs, keyMap, version, path, namespace, ctx, newNodes);
 
     inst[_RENDERED] = vnode.childs;
     inst[_NODES] = newNodes;
     syncDOMChildren(container, oldNodes, newNodes);
 }
 
-function reconcile2Portal(vnode, keyMap, actualUIDs, path, namespace, ctx, oldElement, out) {
+function reconcile2Portal(vnode, keyMap, version, path, namespace, ctx, oldElement, out) {
     let inst = null;
 
     if (oldElement && oldElement.tag === Portal && oldElement._instance) {
@@ -1041,13 +1044,13 @@ function reconcile2Portal(vnode, keyMap, actualUIDs, path, namespace, ctx, oldEl
         };
     }
     // Записываем vnode в keyMap (для обоих путей — reuse и create)
-    keyMap.set(path, vnode);
+    vnode._v = version; keyMap._count++; keyMap.set(path, vnode);
 
     vnode._instance = inst;
     inst[_NAMESPACE] = namespace;
     vnode.props?.ref?.(inst);
 
-    reconcilePortalChildren(inst, vnode, keyMap, actualUIDs, path, namespace, ctx);
+    reconcilePortalChildren(inst, vnode, keyMap, version, path, namespace, ctx);
 
     out.push(inst[_ANCHOR]);
 }
@@ -1073,8 +1076,7 @@ function refreshMemoSubtree(vnode, ctx, namespace, out) {
         const inst = vnode._instance;
         if (inst) {
             const keyMap = new Map();
-            const actualUIDs = new Set();
-            reconcilePortalChildren(inst, vnode, keyMap, actualUIDs, '', namespace, ctx);
+            reconcilePortalChildren(inst, vnode, keyMap, version, '', namespace, ctx);
         }
         if (inst && inst[_NODES]) { for (let i = 0; i < inst[_NODES].length; i++) out.push(inst[_NODES][i]); }
         return;
@@ -1180,13 +1182,13 @@ function mount(input, container) {
     }
 
     if (!oldVnode) {
-        // Первый mount: keyMap пустой. actualUIDs — в dev настоящий Set (для duplicate warning),
-        // в prod заглушка (cleanup не нужен, duplicate detection пропускаем для скорости).
+        // Первый mount: keyMap пустой. version инкрементируется, vnodes помечаются _v.
+        // duplicate detection через _v field, cleanup не нужен (keyMap пустой).
         const keyMap = new Map();
-        const actualUIDs = IS_DEV ? new Set() : NO_ACTUAL_UIDS;
+        const version = ++reconcileVersion;
         mountedQueue = [];  // собираем новые компоненты для onMounted
         const flat = [];
-        reconcile2(vnode, keyMap, actualUIDs, '', HTML_NS, null, flat);
+        reconcile2(vnode, keyMap, version, '', HTML_NS, null, flat);
 
         for (let i = 0; i < flat.length; i++) {
             container.appendChild(flat[i]);
@@ -1205,21 +1207,23 @@ function mount(input, container) {
     // Повторный mount: keyMap персистентный, после прошлого mount + cleanup актуальный.
     // populateKeyMap НЕ нужен — reconcile2 сам заполняет, cleanup удаляет неиспользуемые.
     const keyMap = mountedKeyMaps.get(container);
-    const actualUIDs = new Set();
+    const version = ++reconcileVersion;
+    keyMap._count = 0;
     mountedQueue = [];
 
     // oldNodes — сохранённые при прошлом mount top-level DOM узлы (без O(n) обхода).
     const oldNodes = mountedNodes.get(container) || [];
     const flat = [];
-    reconcile2(vnode, keyMap, actualUIDs, '', HTML_NS, null, flat);
+    reconcile2(vnode, keyMap, version, '', HTML_NS, null, flat);
 
-    // Cleanup — unmount и удаление из keyMap того, чего нет в новом дереве.
-    for (const key of keyMap.keys()) {
-        if (!actualUIDs.has(key)) {
-            const oldElement = keyMap.get(key);
-            unmountVdom(oldElement);
-            keyMap.delete(key);
-        }
+    // Cleanup только если в keyMap есть untouched oldElements.
+    if (keyMap.size > keyMap._count) {
+        keyMap.forEach((oldElement, key) => {
+            if (oldElement._v !== version) {
+                unmountVdom(oldElement);
+                keyMap.delete(key);
+            }
+        });
     }
 
     syncDOMChildren(container, oldNodes, flat);
