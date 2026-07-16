@@ -86,19 +86,19 @@ function collectDOMNodes(childs) {
 // h() — создание VDOM узлов
 // ============================================================================
 
-function h(type, props, ...children) {
-    // Мутируем children in-place — это свежий массив из rest params, никто больше на него не ссылается.
-    // Не создаём normalized — экономим аллокацию массива.
-    for (let i = 0; i < children.length; i++) {
-        const c = children[i];
-        if (typeof c === 'string' || typeof c === 'number') {
-            children[i] = { _text: "" + c };
+function h(tag, props, ...childs) {
+    props ||= EMPTY_PROPS;
+    for (let i = 0, l = childs.length; i < l; i++) {
+        const c = childs[i];
+        if (typeof c === 'string') {
+            childs[i] = { _text: c };
+        } else if (typeof c === 'number') {
+            childs[i] = { _text: '' + c };
         } else if (c == undefined || c === false || c === true) {
-            children[i] = null;
+            childs[i] = null;
         }
-        // else: vnode — уже на месте, не трогаем
     }
-    return { tag: type, props: props || EMPTY_PROPS, childs: children };
+    return { tag, props, childs };
 }
 
 function createPortal(children, containerGetter) {
@@ -130,30 +130,40 @@ const _RENDERED = Symbol('rendered');
 const _ANCHOR = Symbol('anchor');
 const _CONTAINER = Symbol('container');
 
-const RESERVED = new Set(['init','props','memo','onMounted','onUpdated','onUnmounted','context']);
-
 function Component(definition) {
     function ComponentClass() {
-        for (const key in definition) {
-            if (RESERVED.has(key)) continue;
+        const inst = {};
+
+        const keys = Object.keys(definition);
+        const len = keys.length;
+        for (let i = 0; i < len; i++) {
+            const key = keys[i];
+            if (key === 'render' || key === 'init' || key === 'props' || key === 'memo' || key === 'onMounted' || key === 'onUpdated' || key === 'onUnmounted' || key === 'context') {
+                continue;
+            };
+
             const val = definition[key];
             if (typeof val === 'function') {
-                this[key] = val.bind(this);
+                inst[key] = val.bind(inst);
             } else {
-                this[key] = val;
+                inst[key] = val;
             }
         }
-        this[_DEF] = definition;
-        this[_PARENT_CTX] = null;
-        this[_INCOMING_PROPS] = null;
-        this[_VDOM] = null;
-        this[_NODES] = [];
-        this[_IS_MOUNTED] = false;
-        this[_IN_CONTEXT_CALL] = false;
-        this[_NAMESPACE] = HTML_NS;
-        this[_HAS_CHILD_COMPS] = false;
 
-        this.props = EMPTY_PROPS;
+
+        inst[_NAMESPACE] = HTML_NS;
+        inst[_NODES] = EMPTY_ARRAY;
+        inst[_DEF] = definition;
+
+        inst[_PARENT_CTX] = null;
+        inst[_INCOMING_PROPS] = null;
+        inst[_VDOM] = null;
+        inst[_IS_MOUNTED] = false;
+        inst[_IN_CONTEXT_CALL] = false;
+        inst[_HAS_CHILD_COMPS] = false;
+
+        inst.props = EMPTY_PROPS;
+        return inst;
     }
     ComponentClass._definition = definition;
     return ComponentClass;
@@ -296,12 +306,13 @@ function attachInstanceAPI(inst) {
             // keyMap._count = количество keyMap.set calls в этом render (без reuse).
             // Если keyMap.size > _count — есть старые элементы не переиспользованные/не заменённые.
             if (oldVdom && keyMap.size > keyMap._count) {
-                keyMap.forEach((oldElement, key) => {
+                for (const key of keyMap.keys()) {
+                    const oldElement = keyMap.get(key);
                     if (oldElement._v !== version) {
                         unmountVdom(oldElement);
                         keyMap.delete(key);
                     }
-                });
+                }
             }
 
             inst[_NODES] = flat;
@@ -844,12 +855,13 @@ function reconcile2HTML(vnode, keyMap, version, path, namespace, ctx, oldElement
             const newProps = vnode.props;
             if (oldProps !== newProps) {
                 let propsChanged = false;
-                let count1 = 0, count2 = 0;
+                let count1 = 0;
                 for (const key in oldProps) {
                     count1++;
                     if (newProps[key] !== oldProps[key]) { propsChanged = true; break; }
                 }
                 if (!propsChanged) {
+                    let count2 = 0;
                     for (const key in newProps) count2++;
                     propsChanged = count1 !== count2;
                 }
@@ -1137,9 +1149,10 @@ function buildIncomingProps(rawProps, childs) {
 
 function normalizeMountInput(input) {
     if (input === null || input === undefined) return null;
+    if (typeof input === 'string') { return { _text: input }; }
+    if (typeof input === 'number') { return { _text: '' + input }; }
     if (typeof input === 'function' && input._definition) return h(input, {});
     if (Array.isArray(input)) return h(Fragment, {}, ...input);
-    if (typeof input === 'string' || typeof input === 'number') { return { _text: "" + input }; }
     if (typeof input === 'object' && input !== null) return input;
     throw new Error('mount(): unsupported input type: ' + typeof input);
 }
