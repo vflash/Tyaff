@@ -48,40 +48,6 @@ function createElement(namespace, tag) {
     return dom;
 };
 
-function collectDOMNodes(childs) {
-    const result = [];
-    let len = 0;
-    function walk(node) {
-        if (node == null) return;
-        if (Array.isArray(node)) {
-            for (let i = 0; i < node.length; i++) walk(node[i]);
-            return;
-        }
-        if (typeof node !== 'object') return;
-        if (node.nodeType) {
-            result[len++] = node;
-            return;
-        }
-        if (node._instance) {
-            const inst = node._instance;
-            if (inst[_ANCHOR] && inst[_ANCHOR].nodeType) result[len++] = inst[_ANCHOR];
-            if (!inst[_IS_PORTAL] && Array.isArray(inst[_NODES])) {
-                for (let i = 0; i < inst[_NODES].length; i++) walk(inst[_NODES][i]);
-            }
-            return;
-        }
-        if (node._el) {
-            result[len++] = node._el;
-            return;
-        }
-        if (Array.isArray(node._nodes)) {
-            for (let i = 0; i < node._nodes.length; i++) walk(node._nodes[i]);
-        }
-    }
-    walk(childs);
-    return result;
-}
-
 // ============================================================================
 // h() — создание VDOM узлов
 // ============================================================================
@@ -406,12 +372,6 @@ function keyUID(key) {
     return '#' + (typeof key === 'string' && key.indexOf(',') !== -1 ? key.replace(/,/g, ',,') : key);
 }
 
-function makeMapKey(vnode, path) {
-    const key = vnode?.props?.key;
-    if (key !== undefined) return keyUID(key);
-    return path;
-}
-
 // ============================================================================
 // Props
 // ============================================================================
@@ -576,10 +536,6 @@ function applyProps(dom, oldProps, newProps, namespace) {
         if ('checked' in newProps && oldProps.checked !== newProps.checked) { applyProp(dom, 'checked', newProps.checked, namespace); }
     }
 }
-
-// ============================================================================
-// Refs
-// ============================================================================
 
 // ============================================================================
 // Lifecycle
@@ -921,24 +877,14 @@ function reconcile2HTML(vnode, keyMap, version, path, namespace, ctx, oldElement
 }
 
 function reconcile2Fragment(vnode, keyMap, version, path, namespace, ctx, oldElement, out) {
-    const hasKey = vnode.props?.key !== undefined;
-
-    if (hasKey && oldElement && oldElement.tag === Fragment) {
-        vnode._v = version; keyMap._count++; keyMap.set(path, vnode);
-        const newNodes = [];
-        reconcile2(vnode.childs, keyMap, version, path, namespace, ctx, newNodes);
-        vnode._nodes = newNodes;
-        vnode._instance = oldElement._instance;
-        for (let i = 0; i < newNodes.length; i++) out.push(newNodes[i]);
-    } else {
-        if (oldElement && oldElement.tag !== Fragment) {
-            unmountVdom(oldElement);
-        }
-        const nodes = [];
-        reconcile2(vnode.childs, keyMap, version, path, namespace, ctx, nodes);
-        vnode._nodes = nodes;
-        for (let i = 0; i < nodes.length; i++) out.push(nodes[i]);
-    }
+    // Fragment — прозрачная группа: vnode в keyMap не хранится,
+    // переиспользование детей идёт по их собственным UID.
+    // oldElement (если есть) — vnode другого типа на этой позиции → unmount.
+    if (oldElement) unmountVdom(oldElement);
+    const nodes = [];
+    reconcile2(vnode.childs, keyMap, version, path, namespace, ctx, nodes);
+    vnode._nodes = nodes;
+    for (let i = 0; i < nodes.length; i++) out.push(nodes[i]);
 }
 
 function reconcile2Component(vnode, keyMap, version, path, namespace, ctx, oldElement, out) {
@@ -1153,7 +1099,7 @@ function normalizeMountInput(input) {
     if (typeof input === 'number') { return { _text: '' + input }; }
     if (typeof input === 'function' && input._definition) return h(input, {});
     if (Array.isArray(input)) return h(Fragment, {}, ...input);
-    if (typeof input === 'object' && input !== null) return input;
+    if (typeof input === 'object') return input;
     throw new Error('mount(): unsupported input type: ' + typeof input);
 }
 
