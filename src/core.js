@@ -1046,7 +1046,7 @@ function refreshMemoSubtree(vnode, keyMap, version, ctx, namespace, out) {
         if (inst) {
             // Memo-skip path: only check container change, don't re-render children
             const container = vnode.props.containerGetter();
-            
+
             // Case 1: first mount (shouldn't happen in memo-skip, but handle it)
             if (!inst[_CONTAINER] && container) {
                 inst[_CONTAINER] = container;
@@ -1142,7 +1142,7 @@ function collectAllInstances(vnode) {
             return;
         }
         if (node.tag === Portal) { const inst = node._instance; if (inst && inst[_RENDERED]) walk(inst[_RENDERED]); return; }
-        if (node.tag === Fragment) { if (Array.isArray(node._nodes)) { for (let ci = 0; ci < node._nodes.length; ci++) walk(node._nodes[ci]); } return; }
+        if (node.tag === Fragment) { if (Array.isArray(node.childs)) { for (let ci = 0; ci < node.childs.length; ci++) walk(node.childs[ci]); } return; }
         if (node.childs) { for (let ci = 0; ci < node.childs.length; ci++) walk(node.childs[ci]); }
     }
     walk(vnode);

@@ -238,6 +238,36 @@ if (hasDOM) {
         });
 
     });
+
+    describe('refresh() и Fragment', () => {
+        test('refresh() находит компоненты внутри Fragment (корень-массив)', async () => {
+            const c = createContainer();
+            let renderCount = 0;
+
+            const Child = Component({
+                name: 'Child',
+                render() {
+                    renderCount++;
+                    return h('span', null, 'Child ' + renderCount);
+                }
+            });
+
+            // 1. Монтируем массив (который становится Fragment) с компонентом внутри
+            mount([h(Child, { key: 'c' })], c);
+
+            assert.equal(renderCount, 1, 'первый render должен быть вызван');
+            assert.equal(c.firstChild.tagName, 'SPAN');
+            assert.equal(c.firstChild.textContent, 'Child 1');
+
+            // 2. Вызываем refresh()
+            await refresh();
+
+            // Ожидаем, что refresh() обойдет Fragment и найдет Child, вызвав его update()
+            assert.equal(renderCount, 2, 'refresh() должен вызвать render компонента внутри Fragment');
+            assert.equal(c.firstChild.textContent, 'Child 2');
+        });
+    });
+
 }
 
 console.log('\n✅ Test-spec-07 инициализирован\n');
