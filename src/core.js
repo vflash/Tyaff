@@ -222,7 +222,12 @@ function attachInstanceAPI(inst) {
                 const name = def.name || 'Component';
                 console.error('❌ Error in component "' + name + '":', err);
             } else { throw err; }
-        } finally { isUpdating = false; }
+        } finally {
+            isUpdating = false;
+            const resolvers = updateResolvers;
+            updateResolvers = null;
+            if (resolvers) { for (let i = 0; i < resolvers.length; i++) { resolvers[i](false); } }
+        }
     };
 
     function doRerender() {
@@ -253,14 +258,13 @@ function attachInstanceAPI(inst) {
 
         const oldVdom = inst[_VDOM];
         let newNodes;
+        const version = ++reconcileVersion;
+        keyMap._count = 0;
 
         if (shouldRender) {
             let newVdom;
             isRendering = true;
             try { newVdom = renderFn.call(inst, inst.props); } finally { isRendering = false; }
-
-            const version = ++reconcileVersion;
-            keyMap._count = 0;
             inst[_HAS_CHILD_COMPS] = false;
             const prevQueue = mountedQueue;
             mountedQueue = [];
@@ -293,7 +297,7 @@ function attachInstanceAPI(inst) {
         } else {
             if (inst[_HAS_CHILD_COMPS]) {
                 const flat = [];
-                refreshMemoSubtree(oldVdom, inst, inst[_NAMESPACE], flat);
+                refreshMemoSubtree(oldVdom, keyMap, version, inst, inst[_NAMESPACE], flat);
                 inst[_NODES] = flat;
             }
         }
@@ -1024,10 +1028,10 @@ function reconcile2Portal(vnode, keyMap, version, path, namespace, ctx, oldEleme
 // Memo-skip
 // ============================================================================
 
-function refreshMemoSubtree(vnode, ctx, namespace, out) {
+function refreshMemoSubtree(vnode, keyMap, version, ctx, namespace, out) {
     if (vnode == null) return;
     if (Array.isArray(vnode)) {
-        for (let i = 0; i < vnode.length; i++) { refreshMemoSubtree(vnode[i], ctx, namespace, out); }
+        for (let i = 0; i < vnode.length; i++) { refreshMemoSubtree(vnode[i], keyMap, version, ctx, namespace, out); }
         return;
     }
     if (vnode._text !== undefined) {
@@ -1040,8 +1044,30 @@ function refreshMemoSubtree(vnode, ctx, namespace, out) {
     if (tag === Portal) {
         const inst = vnode._instance;
         if (inst) {
-            const keyMap = new Map();
-            reconcilePortalChildren(inst, vnode, keyMap, version, '', namespace, ctx);
+            // Memo-skip path: only check container change, don't re-render children
+            const container = vnode.props.containerGetter();
+            
+            // Case 1: first mount (shouldn't happen in memo-skip, but handle it)
+            if (!inst[_CONTAINER] && container) {
+                inst[_CONTAINER] = container;
+                appendAll(container, inst[_NODES]);
+            }
+            // Case 2: container disappeared
+            else if (inst[_CONTAINER] && !container) {
+                inst[_CONTAINER] = null;
+            }
+            // Case 3: container changed
+            else if (inst[_CONTAINER] !== container && container) {
+                const oldContainer = inst[_CONTAINER];
+                inst[_CONTAINER] = container;
+                for (let i = 0; i < inst[_NODES].length; i++) {
+                    const n = inst[_NODES][i];
+                    if (n?.parentNode === oldContainer) {
+                        oldContainer.removeChild(n);
+                        container.appendChild(n);
+                    }
+                }
+            }
         }
         if (inst && inst[_NODES]) { for (let i = 0; i < inst[_NODES].length; i++) out.push(inst[_NODES][i]); }
         return;
@@ -1065,13 +1091,13 @@ function refreshMemoSubtree(vnode, ctx, namespace, out) {
 
     if (tag === Fragment) {
         if (vnode.childs) {
-            for (let i = 0; i < vnode.childs.length; i++) { refreshMemoSubtree(vnode.childs[i], ctx, namespace, out); }
+            for (let i = 0; i < vnode.childs.length; i++) { refreshMemoSubtree(vnode.childs[i], keyMap, version, ctx, namespace, out); }
         }
         return;
     }
 
     if (vnode.childs) {
-        for (let i = 0; i < vnode.childs.length; i++) { refreshMemoSubtree(vnode.childs[i], ctx, namespace, out); }
+        for (let i = 0; i < vnode.childs.length; i++) { refreshMemoSubtree(vnode.childs[i], keyMap, version, ctx, namespace, out); }
     }
     if (vnode._el) out.push(vnode._el);
 }

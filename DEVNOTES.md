@@ -1,3 +1,29 @@
+## 2026-07-19 — Исправлен Баг #1 (Portal + memo-skip)
+
+### Проблема
+При вызове `update()` на компоненте с `memo()`, когда render пропускается (memo-skip), порталы внутри компонента вызывали:
+1. `ReferenceError: version is not defined` в `refreshMemoSubtree`
+2. Пересоздание DOM-узлов портала (сателлит 1)
+3. Зависание Promise при ошибке в render (сателлит 2)
+
+### Корень проблемы
+1. `refreshMemoSubtree` не принимала `keyMap` и `version` как параметры, но использовала их внутри
+2. В Portal handling создавался новый `keyMap` вместо использования родительского
+3. `version` определялась внутри `if (shouldRender)`, но использовалась в `else` ветке
+4. `updateResolvers` не резолвились в `finally` блоке при ошибке
+
+### Решение
+1. Изменили сигнатуру `refreshMemoSubtree(vnode, keyMap, version, ctx, namespace, out)`
+2. Убрали `const keyMap = new Map()` в Portal handling, используем родительский
+3. Переместили `const version = ++reconcileVersion` и `keyMap._count = 0` до `if (shouldRender)`
+4. Добавили резолв `updateResolvers` в `finally` блоке `_rerender`
+5. В `refreshMemoSubtree` для Portal используем упрощённую логику (только проверка смены контейнера, без reconcile детей)
+
+### Результат
+Все 170 тестов проходят ✅
+
+---
+
 # DEVNOTES.md — Заметки для разработчиков
 
 > **Для AI-агентов:** читай раздел "📍 Текущее состояние" первым — там что реально в коде.
