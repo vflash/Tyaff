@@ -684,6 +684,11 @@ function syncDOMChildren(parentDOM, oldNodes, newNodes) {
 function reconcile2(vnode, keyMap, version, path, namespace, ctx, out) {
     if (vnode == null) return;
 
+    // Bug 3 fix: Handle raw strings/numbers in nested arrays
+    if (typeof vnode === 'string' || typeof vnode === 'number') {
+        vnode = { _text: typeof vnode === 'string' ? vnode : '' + vnode };
+    }
+
     if (Array.isArray(vnode)) {
         const len = vnode.length;
         if (len === 0) return;
