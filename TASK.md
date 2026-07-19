@@ -21,11 +21,11 @@
 - **Где:** `refreshMemoSubtree`, строка ~1043 (бывш. 1098)
 - **Суть:** ветка Portal вызывает `reconcilePortalChildren(..., version, ...)` — переменная `version` не существует в этом скоупе
 - **Воспроизведение:** компонент с `memo()` + портал в поддереве → `update()` без смены зависимостей → `ReferenceError: version is not defined`
-- **Сателлиты (НЕ ИСПРАВЛЕНО):**
+- **Сателлиты (ИСПРАВЛЕНО):**
   - Туда передаётся свежий `new Map()` вместо родительского keyMap → дети портала пересоздавались бы (нарушение «Portal использует родительский keyMap» из DEVNOTES)
   - При ошибке в `doRerender` промис `update()` не резолвится никогда (resolvers не флашатся в catch-ветке `_rerender`) → вечный `await`
 
-### Баг 4 🔴 — двойной onUnmounted при исчезновении контейнера портала — НЕ ИСПРАВЛЕНО
+### Баг 4 🔴 — двойной onUnmounted при исчезновении контейнера портала — ИСПРАВЛЕНО
 - **Где:** `reconcilePortalChildren` case 2 (~строка 957)
 - **Суть:** `unmountVdom(inst[_RENDERED])` + родительский cleanup по version вызывает `unmountVdom` повторно → `onUnmounted` ×2, `ref(null)` ×2
 - **Фикс:** пометить детей `_v = version` и отдать unmount cleanup'у (или удалять из keyMap на месте)
@@ -73,4 +73,4 @@
 
 - 🔵 text reuse не инкрементирует `keyMap._count` (~стр. 690-705, 833-850) → лишний cleanup-scan O(keyMap) на каждый render списков (возможно, часть отставания в «Update all 5000»)
 - 🔵 `mountedContainers` — strong Set → утечка контейнеров без `mount(null)` (SPEC §12 обещает GC)
-- 🔵 Висящие updateResolvers при ошибке (общий фикс с багом 1) — **НЕ ИСПРАВЛЕНО**
+- 🔵 Висящие updateResolvers при ошибке (общий фикс с багом 1) — **ИСПРАВЛЕНО**

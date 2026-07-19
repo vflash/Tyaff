@@ -167,13 +167,14 @@ function flushRefreshResolvers() {
 
 function flushBatch() {
     isFlushing = true;
+    let hasError = false;
     try {
         nestedUpdateCount++;
         if (nestedUpdateCount > NESTED_UPDATE_LIMIT) {
             console.error('❌ Maximum update depth exceeded (' + NESTED_UPDATE_LIMIT + ').');
             batchQueue.clear();
             isBatchScheduled = false;
-            flushRefreshResolvers();
+            hasError = true;
             return;
         }
         const toUpdate = [];
@@ -193,8 +194,14 @@ function flushBatch() {
         if (batchQueue.size > 0 && !isBatchScheduled) {
             isBatchScheduled = true;
             Promise.resolve().then(flushBatch);
-        } else if (batchQueue.size === 0) { flushRefreshResolvers(); }
-    } finally { isFlushing = false; }
+        }
+    } catch (err) {
+        hasError = true;
+        throw err;
+    } finally {
+        isFlushing = false;
+        if (hasError || batchQueue.size === 0) flushRefreshResolvers();
+    }
 }
 
 // ============================================================================
@@ -566,6 +573,8 @@ function triggerMounted() {
 
 function unmountVdom(vnode, seen) {
     if (vnode == null || typeof vnode !== 'object') return;
+    if (vnode._unmounted) return; // Защита от двойного вызова (Bug 4)
+    vnode._unmounted = true;
     if (IS_DEV) {
         if (!seen) seen = new WeakSet();
         if (seen.has(vnode)) return;
