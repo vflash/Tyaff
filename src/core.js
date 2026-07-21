@@ -67,9 +67,11 @@ function h(tag, props, ...childs) {
     return { tag, props, childs };
 }
 
-function createPortal(children, containerGetter) {
+function createPortal(children, containerGetter, extraProps) {
     const kids = Array.isArray(children) ? children : [children];
-    return { tag: Portal, props: { containerGetter }, childs: kids };
+    const props = { containerGetter };
+    if (extraProps) Object.assign(props, extraProps);
+    return { tag: Portal, props, childs: kids };
 }
 
 // ============================================================================
@@ -996,6 +998,7 @@ function reconcilePortalChildren(inst, vnode, keyMap, version, path, namespace, 
 
 function reconcile2Portal(vnode, keyMap, version, path, namespace, ctx, oldElement, out) {
     let inst = null;
+    let isNewInstance = false;
 
     if (oldElement && oldElement.tag === Portal && oldElement._instance) {
         inst = oldElement._instance;
@@ -1011,13 +1014,17 @@ function reconcile2Portal(vnode, keyMap, version, path, namespace, ctx, oldEleme
             [_CONTAINER]: null,
             [_NAMESPACE]: namespace
         };
+        isNewInstance = true;
     }
     // Записываем vnode в keyMap (для обоих путей — reuse и create)
     vnode._v = version; keyMap._count++; keyMap.set(path, vnode);
 
     vnode._instance = inst;
     inst[_NAMESPACE] = namespace;
-    vnode.props?.ref?.(inst);
+    // ref вызывается ТОЛЬКО на mount (новый instance), не на update
+    if (isNewInstance) {
+        vnode.props?.ref?.(inst);
+    }
 
     reconcilePortalChildren(inst, vnode, keyMap, version, path, namespace, ctx);
 
