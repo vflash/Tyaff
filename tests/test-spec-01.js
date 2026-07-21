@@ -634,7 +634,7 @@ if (hasDOM) {
 
             // Принудительный update без изменения value
             // memo() вернёт те же deps → shouldRender = false
-            parent.update({});
+            parent.update();
             await delay(10);
 
             // ⚡ Ключевая проверка по спеке:
@@ -854,7 +854,7 @@ if (hasDOM) {
             const initialMemoCalls = childMemoCallCount;
 
             // Update без изменения value
-            parent.update({});
+            parent.update();
             await delay(20);
 
             // Parent заблокирован memo

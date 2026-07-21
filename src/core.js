@@ -321,19 +321,18 @@ function attachInstanceAPI(inst) {
             console.error('❌ Cannot call update() inside render().');
             return Promise.resolve(false);
         }
+        let changed = false;
         if (patch && typeof patch === 'object') {
-            let hasKeys = false;
-            for (const k in patch) { hasKeys = true; break; }
-            if (!hasKeys) {
-                if (!isInitialized) return Promise.resolve(false);
-                return inst[_SCHEDULE_UPDATE]();
+            for (const k in patch) {
+                if (inst[k] !== patch[k]) {
+                    inst[k] = patch[k];
+                    changed = true;
+                }
             }
-            let changed = false;
-            for (const k in patch) { if (inst[k] !== patch[k]) { changed = true; break; } }
-            if (!changed) return Promise.resolve(false);
-            for (const k in patch) { inst[k] = patch[k]; }
+        } else {
+            changed = true;
         }
-        if (!isInitialized) return Promise.resolve(false);
+        if (!isInitialized || !changed) return Promise.resolve(false);
         return inst[_SCHEDULE_UPDATE]();
     };
 

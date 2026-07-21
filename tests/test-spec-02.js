@@ -421,7 +421,7 @@ if (hasDOM) {
             const vnode = mount(MyComp, container);
             const inst = vnode._instance;
             renderCount = 0;
-            inst.update({});
+            inst.update();
             await delay(10);
             assert.equal(renderCount, 1);
         });
