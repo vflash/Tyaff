@@ -354,7 +354,7 @@ if (hasDOM) {
             assert.equal(textarea.value, 'from-value');
         });
 
-        test('пересоздание input при смене type', () => {
+        test('обновление input при смене type (React-like)', () => {
             const container = createContainer();
             mount(h('input', { type: 'text' }), container);
             const oldInput = container.firstChild;
@@ -362,18 +362,18 @@ if (hasDOM) {
 
             mount(h('input', { type: 'password' }), container);
             const newInput = container.firstChild;
-            assert.notEqual(newInput, oldInput, 'должен быть новый элемент');
+            assert.strictEqual(newInput, oldInput, 'элемент должен переиспользоваться');
             assert.equal(newInput.type, 'password');
         });
 
-        test('пересоздание select при смене multiple', () => {
+        test('обновление select при смене multiple (React-like)', () => {
             const container = createContainer();
             mount(h('select', null, h('option', { value: 'a' }, 'A')), container);
             const oldSelect = container.firstChild;
 
             mount(h('select', { multiple: true }, h('option', { value: 'a' }, 'A')), container);
             const newSelect = container.firstChild;
-            assert.notEqual(newSelect, oldSelect, 'должен быть новый элемент');
+            assert.strictEqual(newSelect, oldSelect, 'элемент должен переиспользоваться');
             assert.equal(newSelect.multiple, true);
         });
     });
@@ -738,10 +738,10 @@ if (hasDOM) {
     });
 
     // =========================================================================
-    // RECREATE_ATTRS — type/is/multiple должны пересоздавать элемент
+    // REACT_LIKE_ATTRS — type/is/multiple НЕ пересоздают элемент (React-way)
     // =========================================================================
-    describe('Recreate on attribute change', () => {
-        test('button.type change → пересоздание element', () => {
+    describe('Attribute update (React-like, no recreation)', () => {
+        test('button.type change → element переиспользуется', () => {
             const container = createContainer();
             mount(h('button', { type: 'button' }, 'ok'), container);
             const btn1 = container.firstChild;
@@ -750,10 +750,10 @@ if (hasDOM) {
             mount(h('button', { type: 'submit' }, 'ok'), container);
             const btn2 = container.firstChild;
             assert.equal(btn2.getAttribute('type'), 'submit');
-            assert.notStrictEqual(btn1, btn2, 'button должен быть пересоздан при смене type');
+            assert.strictEqual(btn1, btn2, 'button должен переиспользоваться при смене type');
         });
 
-        test('input.type change → пересоздание element', () => {
+        test('input.type change → element переиспользуется', () => {
             const container = createContainer();
             mount(h('input', { type: 'text' }), container);
             const inp1 = container.firstChild;
@@ -762,10 +762,10 @@ if (hasDOM) {
             mount(h('input', { type: 'checkbox' }), container);
             const inp2 = container.firstChild;
             assert.equal(inp2.getAttribute('type'), 'checkbox');
-            assert.notStrictEqual(inp1, inp2, 'input должен быть пересоздан при смене type');
+            assert.strictEqual(inp1, inp2, 'input должен переиспользоваться при смене type');
         });
 
-        test('is attribute change → пересоздание element', () => {
+        test('is attribute change → element переиспользуется', () => {
             const container = createContainer();
             mount(h('div', { is: 'my-element-1' }), container);
             const div1 = container.firstChild;
@@ -774,10 +774,10 @@ if (hasDOM) {
             mount(h('div', { is: 'my-element-2' }), container);
             const div2 = container.firstChild;
             assert.equal(div2.getAttribute('is'), 'my-element-2');
-            assert.notStrictEqual(div1, div2, 'element должен быть пересоздан при смене is');
+            assert.strictEqual(div1, div2, 'element должен переиспользоваться при смене is');
         });
 
-        test('select.multiple change → пересоздание element', () => {
+        test('select.multiple change → element переиспользуется', () => {
             const container = createContainer();
             mount(h('select', { multiple: false }), container);
             const sel1 = container.firstChild;
@@ -786,7 +786,7 @@ if (hasDOM) {
             mount(h('select', { multiple: true }), container);
             const sel2 = container.firstChild;
             assert.equal(sel2.hasAttribute('multiple'), true);
-            assert.notStrictEqual(sel1, sel2, 'select должен быть пересоздан при смене multiple');
+            assert.strictEqual(sel1, sel2, 'select должен переиспользоваться при смене multiple');
         });
 
         test('input.type без изменений → element переиспользуется', () => {

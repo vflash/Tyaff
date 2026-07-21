@@ -56,6 +56,8 @@
 ## ✅ Этап 4 — Пересоздание по критическим атрибутам (баг 5) — ИСПРАВЛЕНО
 
 ### Баг 5 🟠 — recreate ломает lifecycle детей
+
+**Статус:** ✅ **ИСПРАВЛЕНО** — удалена логика shouldRecreate, теперь React-like поведение (просто обновляем атрибуты без пересоздания DOM)
 - **Где:** `reconcile2HTML`, строки ~793-797 (`type` у input/button, `multiple` у select, `is`)
 - **Суть:** `unmountVdom(oldElement)` вызывает `onUnmounted`/`ref(null)` у детей, но дети остаются в keyMap и переиспользуются → `onUnmounted` без `onMounted`, instance в полуразмонтированном состоянии
 - **Воспроизведение:** `<input type={t}>{h(Child)}</input>`, смена `text`→`password` → события Child: `["unmounted"]`, точка

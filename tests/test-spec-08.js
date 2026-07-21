@@ -21,7 +21,7 @@ try {
     console.warn('⚠️  happy-dom не установлен. DOM-тесты будут пропущены.');
 }
 
-const { h, Component, Fragment, mount } = await import('../src/core.js');
+const { h, Component, Fragment, mount, refresh } = await import('../src/core.js');
 
 function createContainer() {
     if (!hasDOM) throw new Error('DOM недоступен');
@@ -66,5 +66,47 @@ if (hasDOM) {
             mount(h('div', null, children), container);
             assert.equal(container.textContent, 'hello world', 'Array passed as child should work');
         });
+    });
+
+    describe('Reconciliation: attribute patching (no recreation)', () => {
+      test('смена type и is НЕ пересоздает DOM-узел (React-way)', () => {
+        let childUnmounted = false;
+
+        const Child = Component({
+          render: () => h('span', {}, 'child'),
+          onUnmounted: () => { childUnmounted = true; }
+        });
+
+        const container = document.createElement('div');
+
+        // Initial render
+        mount(h('div', {}, [
+          h('input', { id: 'inp', type: 'text', value: 'test' }),
+          h('button', { id: 'btn', is: 'btn-a' }, h(Child))
+        ]), container);
+
+        const oldInput = container.querySelector('#inp');
+        const oldButton = container.querySelector('#btn');
+
+        // Update attributes - используем mount() с новым vnode для update
+        mount(h('div', {}, [
+          h('input', { id: 'inp', type: 'checkbox', value: 'test' }),
+          h('button', { id: 'btn', is: 'btn-b' }, h(Child))
+        ]), container);
+
+        const newInput = container.querySelector('#inp');
+        const newButton = container.querySelector('#btn');
+
+        // 1. DOM nodes are reused
+        assert(oldInput === newInput, 'input DOM node should be reused');
+        assert(oldButton === newButton, 'button DOM node should be reused');
+
+        // 2. Attributes are patched
+        assert(newInput.type === 'checkbox', 'input type should be patched');
+        assert(newButton.getAttribute('is') === 'btn-b', 'button is should be patched');
+
+        // 3. Children are NOT unmounted
+        assert(childUnmounted === false, 'Child should NOT be unmounted on attr change');
+      });
     });
 }

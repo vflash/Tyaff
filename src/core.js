@@ -812,36 +812,22 @@ function reconcile2HTML(vnode, keyMap, version, path, namespace, ctx, oldElement
         oldNodes = oldElement._nodes || [];
         vnode._v = version; keyMap._count++; keyMap.set(path, vnode);
 
-        let shouldRecreate = false;
-        const op = oldElement.props;
-        const np = vnode.props;
-        if (op.is !== np.is) shouldRecreate = true;
-        else if ((tag === 'input' || tag === 'button') && op.type !== np.type) shouldRecreate = true;
-        else if (tag === 'select' && op.multiple !== np.multiple) shouldRecreate = true;
-
-        if (shouldRecreate) {
-            unmountVdom(oldElement);
-            dom = createElement(namespace, vnode.tag)
-            applyPropsDirect(dom, vnode.props, namespace);
-            oldNodes = [];
-        } else {
-            const oldProps = oldElement.props;
-            const newProps = vnode.props;
-            if (oldProps !== newProps) {
-                let propsChanged = false;
-                let count1 = 0;
-                for (const key in oldProps) {
-                    count1++;
-                    if (newProps[key] !== oldProps[key]) { propsChanged = true; break; }
-                }
-                if (!propsChanged) {
-                    let count2 = 0;
-                    for (const key in newProps) count2++;
-                    propsChanged = count1 !== count2;
-                }
-                if (propsChanged) {
-                    applyProps(dom, oldElement.props, vnode.props, namespace);
-                }
+        const oldProps = oldElement.props;
+        const newProps = vnode.props;
+        if (oldProps !== newProps) {
+            let propsChanged = false;
+            let count1 = 0;
+            for (const key in oldProps) {
+                count1++;
+                if (newProps[key] !== oldProps[key]) { propsChanged = true; break; }
+            }
+            if (!propsChanged) {
+                let count2 = 0;
+                for (const key in newProps) count2++;
+                propsChanged = count1 !== count2;
+            }
+            if (propsChanged) {
+                applyProps(dom, oldElement.props, vnode.props, namespace);
             }
         }
     } else {
