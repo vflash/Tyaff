@@ -41,7 +41,7 @@ td:first-child { color: #e6edf3; font-weight: bold; white-space: nowrap; }
 .bar-vanilla { background: #3fb950; }
 .check { color: #3fb950; font-size: 10px; margin-left: 4px; }
 .check-fail { color: #f85149; }
-#arena { position: absolute; left: -9999px; top: 0; }
+#arena { position: fixed; left: -100px; top: 0; height: 1px; width: 1px}
 .note { color: #484f58; font-size: 11px; margin-top: 8px; }
 .memo-section { margin-top: 32px; padding: 20px; background: #161b22; border-radius: 10px; border: 1px solid #30363d; }
 .memo-section h2 { color: #58a6ff; font-size: 16px; margin-bottom: 16px; }
@@ -1427,21 +1427,21 @@ async function benchMemoHit() {
 // ============================================================================
 
 const scenarios = [
-    // ['Mount rows', benchMountRows],
-    // ['Update 1 row', benchUpdate1Row],
-    // ['Reverse (keys)', benchReverse],
-    // ['Swap first/last', benchSwapFirstLast],
-    // ['Mount components', benchMountComponents],
-    // ['Deep tree', benchDeepTree],
-    // ['Move between parents', benchMoveBetweenParents],
-    // ['Move heavy (10 children)', benchMoveBetweenParentsHeavy],
-    // ['Clear + remount', benchClearRemount],
-    // ['Update all rows', benchUpdateAllRows],
-    // ['Insert middle', benchInsertMiddle],
-    // ['Insert comp mid', benchInsertCompMiddle],
-    // ['Insert comp mid memo', benchInsertCompMiddleMemo],
-    // ['Memo skip', benchMemoSkip],
-    // ['No memo (baseline)', benchNoMemo],
+    ['Mount rows', benchMountRows],
+    ['Update 1 row', benchUpdate1Row],
+    ['Reverse (keys)', benchReverse],
+    ['Swap first/last', benchSwapFirstLast],
+    ['Mount components', benchMountComponents],
+    ['Deep tree', benchDeepTree],
+    ['Move between parents', benchMoveBetweenParents],
+    ['Move heavy (10 children)', benchMoveBetweenParentsHeavy],
+    ['Clear + remount', benchClearRemount],
+    ['Update all rows', benchUpdateAllRows],
+    ['Insert middle', benchInsertMiddle],
+    ['Insert comp mid', benchInsertCompMiddle],
+    ['Insert comp mid memo', benchInsertCompMiddleMemo],
+    ['Memo skip', benchMemoSkip],
+    ['No memo (baseline)', benchNoMemo],
     ['Memo hit (1 changed)', benchMemoHit],
 ];
 
