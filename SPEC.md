@@ -684,9 +684,9 @@ mount(h(App, { theme: 'light' }), container);      // update
 mount(null, container);                             // unmount
 ```
 
-**Хранение состояния:** `WeakMap<container, vnode>` — позволяет не загрязнять DOM-объекты и автоматически очищать при удалении контейнера.
+**Хранение состояния:** `Map<container, vnode>` — позволяет не загрязнять DOM-объекты.
 
-При `mount(null, container)` запись удаляется из `WeakMap`, что позволяет контейнеру быть garbage collected.
+При `mount(null, container)` запись удаляется из `Map`, освобождая ресурсы.
 
 **Ограничения:**
 - Один контейнер = одно дерево

@@ -577,7 +577,7 @@ function unmountVdom(vnode, seen) {
     if (vnode._unmounted) return; // Защита от двойного вызова (Bug 4)
     vnode._unmounted = true;
     if (IS_DEV) {
-        if (!seen) seen = new WeakSet();
+        if (!seen) seen = new Set();
         if (seen.has(vnode)) return;
         seen.add(vnode);
     }
@@ -1156,10 +1156,10 @@ function collectAllInstances(vnode) {
     return result;
 }
 
-const mountedTrees = new WeakMap();
-const mountedKeyMaps = new WeakMap();
-const mountedRootInstances = new WeakMap();
-const mountedNodes = new WeakMap(); // top-level DOM узлы для syncDOMChildren
+const mountedTrees = new Map();
+const mountedKeyMaps = new Map();
+const mountedRootInstances = new Map();
+const mountedNodes = new Map(); // top-level DOM узлы для syncDOMChildren
 const mountedContainers = new Set();
 
 function mount(input, container) {
