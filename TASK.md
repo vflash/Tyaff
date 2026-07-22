@@ -74,5 +74,5 @@
 ## ⚠️ Этап 6 — Perf и техдолг — НЕ ИСПРАВЛЕНО
 
 - 🔵 text reuse не инкрементирует `keyMap._count` (~стр. 690-705, 833-850) → лишний cleanup-scan O(keyMap) на каждый render списков (возможно, часть отставания в «Update all 5000»)
-- 🔵 `mountedContainers` — strong Set → утечка контейнеров без `mount(null)` (SPEC §12 обещает GC)
+- ✅ `mountedContainers` — добавлена защита от повторного mount без предварительного unmount (2026-07-22)
 - 🔵 Висящие updateResolvers при ошибке (общий фикс с багом 1) — **ИСПРАВЛЕНО**

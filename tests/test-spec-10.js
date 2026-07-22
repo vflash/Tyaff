@@ -21,7 +21,7 @@ try {
     console.warn('⚠️  happy-dom не установлен. DOM-тесты будут пропущены.');
 }
 
-const { h, Component, mount } = await import('../src/core.js');
+const { h, Component, mount, _cleanupAll } = await import('../src/core.js');
 
 function createContainer() {
     if (!hasDOM) throw new Error('DOM недоступен');

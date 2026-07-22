@@ -1165,6 +1165,10 @@ const mountedContainers = new Set();
 function mount(input, container) {
     const vnode = normalizeMountInput(input);
     const oldVnode = mountedTrees.get(container);
+    
+    if (vnode !== null && mountedContainers.has(container)) {
+        console.warn('⚠️ Container already mounted. Call mount(null, container) first to unmount.');
+    }
 
     if (vnode === null) {
         if (oldVnode) {
