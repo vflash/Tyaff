@@ -73,7 +73,9 @@
 
 ## ⚠️ Этап 6 — Perf и техдолг
 
-- 🔵 text reuse не инкрементирует `keyMap._count` (~стр. 690-705, 833-850) → лишний cleanup-scan O(keyMap) на каждый render списков (возможно, часть отставания в «Update all 5000»)
+- ✅ text reuse не инкрементирует `keyMap._count` (~стр. 690-705, 833-850) — **ИСПРАВЛЕНО** (2026-07-22)
+  - Добавлен `keyMap._count++` при text reuse в `reconcile2()` и `reconcile2HTML()` fast path
+- ✅ `mountedContainers` — добавлена защита от повторного mount без предварительного unmount (2026-07-22)
 - ✅ `mountedContainers` — добавлена защита от повторного mount без предварительного unmount (2026-07-22)
 - ✅ **WeakMap/WeakSet → Map/Set** — замена всех Weak-примитивов на обычные Map/Set (2026-07-22)
   - Контейнеры всё равно хранятся в `mountedContainers` (Set) с strong references

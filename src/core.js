@@ -719,6 +719,7 @@ function reconcile2(vnode, keyMap, version, path, namespace, ctx, out) {
                 oldElement._text = vnode._text;
             }
             oldElement._v = version;
+            keyMap._count++;
             out.push(oldElement._el);
             return;
         }
@@ -858,6 +859,7 @@ function reconcile2HTML(vnode, keyMap, version, path, namespace, ctx, oldElement
                     oldChild._text = text;
                 }
                 oldChild._v = version;
+                keyMap._count++;
                 vnode._nodes = oldNodes;
                 out.push(dom);
                 return;
@@ -1165,7 +1167,7 @@ const mountedContainers = new Set();
 function mount(input, container) {
     const vnode = normalizeMountInput(input);
     const oldVnode = mountedTrees.get(container);
-    
+
     if (vnode !== null && mountedContainers.has(container)) {
         console.warn('⚠️ Container already mounted. Call mount(null, container) first to unmount.');
     }
